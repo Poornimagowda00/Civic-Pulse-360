@@ -1,4 +1,5 @@
-const configuredApiBase = import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL
+const configuredApiBase = [import.meta.env.VITE_API_BASE, import.meta.env.VITE_API_URL]
+  .find((value) => value && value !== '/api')
 const defaultApiBase = import.meta.env.DEV
   ? 'http://127.0.0.1:8000/api'
   : 'https://civic-pulse-360.onrender.com/api'

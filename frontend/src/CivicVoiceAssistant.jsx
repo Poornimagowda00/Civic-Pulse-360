@@ -44,6 +44,19 @@ function browserLanguage(selected) {
   return navigator.language || 'en-IN'
 }
 
+function detectLanguage(text) {
+  if (/\p{Script=Kannada}/u.test(text)) return 'Kannada'
+  if (/\p{Script=Devanagari}/u.test(text)) return 'Hindi'
+  if (/\p{Script=Telugu}/u.test(text)) return 'Telugu'
+  if (/\p{Script=Tamil}/u.test(text)) return 'Tamil'
+  if (/\p{Script=Malayalam}/u.test(text)) return 'Malayalam'
+  if (/\p{Script=Bengali}/u.test(text)) return 'Bengali'
+  if (/\p{Script=Gujarati}/u.test(text)) return 'Gujarati'
+  if (/\p{Script=Gurmukhi}/u.test(text)) return 'Punjabi'
+  if (/\p{Script=Arabic}/u.test(text)) return 'Urdu'
+  return 'English'
+}
+
 function estimateEmi(text) {
   const amounts = text.match(/(?:₹|rs\.?|inr)?\s*(\d+(?:,\d+)*)/gi)
   if (!/emi|monthly|loan/.test(text.toLowerCase()) || !amounts?.length) return null
@@ -109,7 +122,7 @@ export default function CivicVoiceAssistant({
     setStatus((current) => (current === 'speaking' ? 'idle' : current))
   }
 
-  function speak(text) {
+  function speak(text, languageOverride = language) {
     if (!('speechSynthesis' in window) || typeof window.SpeechSynthesisUtterance !== 'function') {
       setPermissionMessage('Voice playback is not supported by this browser. Text answers are still available.')
       setStatus('idle')
@@ -118,7 +131,7 @@ export default function CivicVoiceAssistant({
     try {
       window.speechSynthesis.cancel()
       const utterance = new SpeechSynthesisUtterance(text)
-      utterance.lang = browserLanguage(language)
+      utterance.lang = browserLanguage(languageOverride)
       utterance.rate = 0.95
       utterance.onstart = () => setStatus('speaking')
       utterance.onend = () => setStatus('idle')
@@ -193,6 +206,7 @@ export default function CivicVoiceAssistant({
     setStatus('processing')
     const updated = [...history, { role: 'user', text: question }]
     setHistory(updated)
+    const responseLanguage = language === 'Auto' ? detectLanguage(question) : language
 
     const intent = resolveVoiceNavigation(question, navigationItems)
     if (intent.type === 'navigate') {
@@ -200,6 +214,15 @@ export default function CivicVoiceAssistant({
       setHistory([...updated, { role: 'assistant', text: answer, navigation: intent.id }])
       onNavigate(intent.id)
       speak(answer)
+      return
+    }
+    if (intent.type === 'portal') {
+      const answer = `Opening the verified ${intent.label}.`
+      setHistory([...updated, { role: 'assistant', text: `${answer} This is an external government website.`, source: intent.href }])
+      const portalWindow = window.open(intent.href, '_blank', 'noopener,noreferrer')
+      if (!portalWindow) window.location.assign(intent.href)
+      speak(answer, responseLanguage)
+      setStatus('idle')
       return
     }
     if (intent.type === 'clarify') {
@@ -237,7 +260,7 @@ export default function CivicVoiceAssistant({
         method: 'POST',
         body: {
           message: question,
-          language,
+          language: responseLanguage,
           current_page: activePage,
           context: history.slice(-6).map((item) => `${item.role}: ${item.text}`).join('\n'),
         },

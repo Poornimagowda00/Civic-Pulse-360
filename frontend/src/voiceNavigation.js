@@ -15,6 +15,14 @@ const navigationAliases = {
   'regional-status': ['regional status', 'regional dashboard', 'regional information', 'region status'],
 }
 
+const portalDirectory = [
+  { id: 'income-certificate', label: 'Income Certificate portal', href: 'https://sevasindhu.karnataka.gov.in/', aliases: ['income certificate', 'income certificate portal', 'income proof'] },
+  { id: 'caste-certificate', label: 'Caste Certificate portal', href: 'https://sevasindhu.karnataka.gov.in/', aliases: ['caste certificate', 'caste certificate portal'] },
+  { id: 'residence-certificate', label: 'Residence Certificate portal', href: 'https://sevasindhu.karnataka.gov.in/', aliases: ['residence certificate', 'domicile certificate', 'residence certificate portal'] },
+  { id: 'scholarship-portal', label: 'National Scholarship Portal', href: 'https://scholarships.gov.in/', aliases: ['scholarship portal', 'scholarships portal', 'national scholarship portal'] },
+  { id: 'grievance-portal', label: 'Karnataka Public Grievance portal', href: 'https://ipgrs.karnataka.gov.in/Citizens/GrievanceSelfService', aliases: ['grievance portal', 'public grievance portal', 'complaint portal'] },
+]
+
 const localizedAliases = {
   janavani: ['ಜನವಾಣಿ'],
   'civic-eye': ['ನಾಗರಿಕ ದೂರು', 'ದೂರು ದಾಖಲಿಸಿ', 'शिकायत दर्ज करें', 'नागरिक शिकायत', 'புகார் பதிவு', 'ఫిర్యాదు నమోదు', 'പരാതി നൽകുക'],
@@ -88,6 +96,14 @@ export function resolveVoiceNavigation(text, navigationItems) {
   const normalized = normalizeText(text)
   if (!normalized) return { type: 'none' }
   const actionRequested = commandPattern.test(normalized)
+
+  if (actionRequested) {
+    const portal = portalDirectory
+      .map((item) => ({ ...item, match: item.aliases.find((alias) => matchesPhrase(normalized, alias)) }))
+      .filter((item) => item.match)
+      .sort((left, right) => right.match.length - left.match.length)[0]
+    if (portal) return { type: 'portal', id: portal.id, label: portal.label, href: portal.href }
+  }
 
   const registry = navigationItems.map((item) => ({
     ...item,

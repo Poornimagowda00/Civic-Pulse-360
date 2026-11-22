@@ -591,6 +591,11 @@ td { padding: 9px 8px; border-bottom: 1px solid var(--border); color: var(--text
 .regional-status-banner b { color:var(--heading);font-size:11px; }
 .regional-status-banner p, .regional-status-banner small { margin:4px 0 0;color:var(--muted);font-size:8px;line-height:1.5; }
 .regional-status-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px; }
+.regional-summary-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0; }
+.regional-summary-card { min-width:0;padding:12px; }
+.regional-summary-card > span { display:block;color:var(--muted);font-size:8px;font-weight:700;letter-spacing:.35px;text-transform:uppercase; }
+.regional-summary-card > b { display:block;margin-top:5px;color:var(--heading);font-size:11px;text-transform:capitalize; }
+.regional-summary-card > p { margin:5px 0 0;color:var(--muted);font-size:8px;line-height:1.45; }
 .regional-status-card { padding:10px;min-width:0; }
 .regional-status-card > div { display:flex;align-items:center;justify-content:space-between;gap:5px; }
 .regional-status-card h3 { margin:0;color:var(--heading);font-size:9px; }
@@ -801,6 +806,29 @@ td { padding: 9px 8px; border-bottom: 1px solid var(--border); color: var(--text
   .document-list { grid-template-columns: 1fr; }
   .travel-destination-grid, .regional-status-grid { grid-template-columns:1fr; }
   .page-heading .button-secondary, .page-heading .official-badge { align-self: flex-start; }
+}
+
+/* Regional Status: keep citizen content readable and avoid squeezed cards. */
+.regional-layout { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 18px; }
+.regional-main, .regional-side { gap: 16px; }
+.regional-status-grid { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+.regional-status-card { padding: 14px; min-height: 180px; }
+.regional-status-card h3 { font-size: 12px; }
+.regional-status-card > p, .regional-detail-note { font-size: 10px; line-height: 1.55; }
+.regional-status-card > small, .regional-status-card > a { font-size: 9px; line-height: 1.45; }
+.regional-citizen-notice { margin: 10px 0 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-soft); color: var(--muted); font-size: 10px; }
+.regional-detail-note { margin: 0 0 8px; padding: 8px; border-left: 3px solid var(--teal); background: var(--teal-pale); color: var(--text); }
+.regional-controls { gap: 12px; }
+.regional-map-panel, .regional-analytics, .regional-ai, .regional-compare, .regional-subscriptions { padding: 16px; }
+@media (max-width: 900px) {
+  .regional-layout { grid-template-columns: 1fr; }
+  .regional-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .regional-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .regional-status-grid { grid-template-columns: 1fr; }
+  .regional-summary-grid { grid-template-columns: 1fr; }
+  .regional-status-card { min-height: 0; }
 }
 /* Authentication and account workspace */
 .auth-screen {

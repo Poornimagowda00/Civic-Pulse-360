@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowDownRight, ArrowDownToLine, ArrowRight, ArrowUpRight, Bell, Bike, Bookmark, Bot,
-  Building2, BusFront, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp,
-  Clock3, CloudSun, FileCheck2, FileText, Filter, Flag, Globe2, GraduationCap,
-  HandCoins, Home, Landmark, Leaf, Lightbulb, ListChecks, LoaderCircle, MapPin,
+  Briefcase, Building2, BusFront, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp,
+  Clock3, CloudSun, ExternalLink, FileCheck2, FileText, Filter, Flag, Globe2, GraduationCap,
+  HandCoins, HeartPulse, Home, Landmark, LayoutDashboard, Leaf, Lightbulb, ListChecks, LoaderCircle, MapPin,
   Menu, MessageCircle, Moon, MoreHorizontal,
   Mic, RefreshCw, Search, Send, ShieldCheck, Siren, Sparkles, Sun, TrainFront, TrendingUp,
   WalletCards, X,
@@ -37,6 +37,14 @@ const modules = [
   { id: 'bengaluru', label: 'Bengaluru 360', icon: Building2, group: 'My services', color: 'green', desc: 'Local transport and city services.' },
   { id: 'travel-hub', label: 'Travel & Booking', icon: Globe2, group: 'Discover', color: 'green', desc: 'Explore destinations and official booking portals.' },
   { id: 'regional-status', label: 'Regional Status', icon: CloudSun, group: 'My services', color: 'blue', desc: 'Explore regions and source-labelled updates.' },
+  { id: 'gov-jobs', label: 'Recruitment Radar', icon: Briefcase, group: 'Discover', color: 'orange', desc: 'Government jobs & exam notifications.' },
+  { id: 'land-property', label: 'Land & Property', icon: Home, group: 'Citizen services', color: 'green', desc: 'Land records, mutation and property services.' },
+  { id: 'health-services', label: 'Health Services', icon: HeartPulse, group: 'Citizen services', color: 'orange', desc: 'Government hospitals and health schemes.' },
+  { id: 'agri-services', label: 'Farmer Services', icon: Leaf, group: 'Discover', color: 'green', desc: 'Agriculture schemes, subsidies and crop services.' },
+  { id: 'business-hub', label: 'Business Hub', icon: TrendingUp, group: 'Discover', color: 'blue', desc: 'Startup, MSME, tenders and government procurement.' },
+  { id: 'karnataka-dir', label: 'Karnataka Services', icon: Landmark, group: 'Citizen services', color: 'blue', desc: 'Complete Karnataka government services directory.' },
+  { id: 'app-tracker', label: 'Application Tracker', icon: ListChecks, group: 'My services', color: 'violet', desc: 'Track all your government applications.' },
+  { id: 'opp-dashboard', label: 'Opportunity Dashboard', icon: LayoutDashboard, group: 'Discover', color: 'violet', desc: 'All schemes, jobs & opportunities in one place.' },
 ]
 
 const schemes = [
@@ -279,6 +287,14 @@ function App() {
           {active === 'bengaluru' && <Bengaluru onNavigate={switchModule} />}
           {active === 'travel-hub' && <TravelHub key={sessionToken} sessionToken={sessionToken} language={profile.language} />}
           {active === 'regional-status' && <RegionalStatus key={sessionToken} sessionToken={sessionToken} language={profile.language} onNavigate={switchModule} />}
+          {active === 'gov-jobs' && <GovJobs sessionToken={sessionToken} onNavigate={switchModule} />}
+          {active === 'land-property' && <LandProperty onNavigate={switchModule} />}
+          {active === 'health-services' && <HealthServices profile={profile} onNavigate={switchModule} />}
+          {active === 'agri-services' && <AgriServices sessionToken={sessionToken} onNavigate={switchModule} />}
+          {active === 'business-hub' && <BusinessHub onNavigate={switchModule} />}
+          {active === 'karnataka-dir' && <KarnatakaDir onNavigate={switchModule} />}
+          {active === 'app-tracker' && <AppTracker sessionToken={sessionToken} backendOnline={backendOnline} />}
+          {active === 'opp-dashboard' && <OppDashboard sessionToken={sessionToken} profile={profile} onNavigate={switchModule} />}
           <footer className="page-footer"><span>© 2026 Civic Pulse 360</span><span><ShieldCheck size={13} /> Information for guidance · Always verify on official portals</span><button onClick={() => switchModule('satya-check')}>Safety & sources <ArrowUpRight size={13} /></button></footer>
         </section>
       </main>
@@ -910,11 +926,20 @@ const REGIONAL_CATEGORY_SLUGS = {
   'Emergency and disaster alerts': 'emergency-alerts',
 }
 
+const REFRESHABLE_REGIONAL_CATEGORIES = new Set(['Weather and rainfall', 'Air quality'])
+
+function regionalStatusLabel(item) {
+  if (item.category === 'Civic complaints' || item.category === 'Road damage') return 'Civic records'
+  if (item.category === 'Government services' || item.category === 'Tourist attractions') return 'Directory'
+  if (item.status === 'live') return 'Measured'
+  return (item.status || 'unavailable').replaceAll('_', ' ')
+}
+
 function CategoryLiveView({ category, data, onNavigate }) {
   if (!data || Object.keys(data).length === 0) {
     return (
       <p className="privacy-note">
-        No additional telemetry fields available for this category.
+        Information is temporarily unavailable for this category. Please try again later.
       </p>
     )
   }
@@ -931,11 +956,11 @@ function CategoryLiveView({ category, data, onNavigate }) {
             </div>
             <div className="category-metric-card">
               <span>Humidity</span>
-              <b>{data.relative_humidity_pct ?? '--'}%</b>
+              <b>{data.relative_humidity_pct ?? data.humidity ?? '--'}%</b>
             </div>
             <div className="category-metric-card">
               <span>Wind Speed</span>
-              <b>{data.wind_speed_kmh ?? '--'} km/h</b>
+              <b>{data.wind_speed_kmh ?? data.wind_speed ?? '--'} km/h</b>
             </div>
             <div className="category-metric-card">
               <span>Precipitation</span>
@@ -1280,19 +1305,19 @@ function CategoryLiveView({ category, data, onNavigate }) {
           <div className="category-metrics-grid">
             <div className="category-metric-card">
               <span>Active Reports</span>
-              <b>{data.total_active_complaints ?? 0}</b>
+                <b>{data.total_active_complaints ?? data.total_complaints ?? 0}</b>
             </div>
             <div className="category-metric-card">
               <span>Pending</span>
-              <b>{data.pending_complaints ?? 0}</b>
+                <b>{data.pending_complaints ?? data.pending_submitted ?? 0}</b>
             </div>
             <div className="category-metric-card">
               <span>Investigating</span>
-              <b>{data.investigating_complaints ?? 0}</b>
+                <b>{data.investigating_complaints ?? data.in_progress ?? 0}</b>
             </div>
             <div className="category-metric-card">
               <span>Resolved</span>
-              <b>{data.resolved_complaints ?? 0}</b>
+                <b>{data.resolved_complaints ?? data.resolved ?? 0}</b>
             </div>
           </div>
           {data.recent_complaints?.length > 0 && (
@@ -1381,12 +1406,12 @@ function CategoryLiveView({ category, data, onNavigate }) {
             {data.schemes?.map((scheme, idx) => (
               <div className="category-sublist-item" key={idx}>
                 <b>{scheme.name} ({scheme.department})</b>
-                <p>{scheme.description}</p>
+                <p>{scheme.description || scheme.benefit}</p>
                 <small><b>Eligibility:</b> {scheme.eligibility}</small><br />
-                <small><b>Benefits:</b> {scheme.benefits}</small>
-                {scheme.application_url && (
+                <small><b>Benefits:</b> {scheme.benefits || scheme.benefit}</small>
+                {(scheme.application_url || scheme.application_portal) && (
                   <div>
-                    <a href={scheme.application_url} target="_blank" rel="noopener noreferrer">
+                    <a href={scheme.application_url || scheme.application_portal} target="_blank" rel="noopener noreferrer">
                       Apply via Official Portal <ArrowUpRight size={10} />
                     </a>
                   </div>
@@ -1411,14 +1436,12 @@ function CategoryLiveView({ category, data, onNavigate }) {
               <div className="category-sublist-item" key={idx}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <b>{attr.name}</b>
-                  <span className="status-tag status-directory">{attr.entry_fee}</span>
                 </div>
                 <p>{attr.location} — {attr.highlights}</p>
-                <small>Timings: {attr.timings}</small>
-                {attr.booking_url && (
+                {(attr.booking_url || attr.official_portal) && (
                   <div>
-                    <a href={attr.booking_url} target="_blank" rel="noopener noreferrer">
-                      Official Booking Link <ArrowUpRight size={10} />
+                    <a href={attr.booking_url || attr.official_portal} target="_blank" rel="noopener noreferrer">
+                      Official information <ArrowUpRight size={10} />
                     </a>
                   </div>
                 )}
@@ -1841,7 +1864,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
       <PageHeading
         eyebrow="CIVIC PULSE 360 · REGIONAL STATUS"
         title="A regional view, with sources and limits in sight."
-        description="Browse regional reports, telemetry, and verified service references for all 15 civic categories. Verified feeds are active for Bengaluru & Karnataka."
+        description="Browse current weather and air-quality measurements, Civic Pulse reports, and official service directories. Unsupported live feeds are not shown."
         action={
           <>
             <button
@@ -1858,8 +1881,8 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
           </>
         }
       />
-      {issue && <p className="inline-error" role="status">{issue}</p>}
-      {liveError && <p className="inline-error" role="status">Live refresh notice: {liveError}</p>}
+      {issue && <p className="regional-citizen-notice" role="status">{issue.includes('required') || issue.includes('signed') || issue.includes('Subscribed') || issue.includes('Unsubscribed') ? issue : 'Information is temporarily unavailable. Please try again later.'}</p>}
+      {liveError && <p className="regional-citizen-notice" role="status">Information is temporarily unavailable. Please try again later.</p>}
       <div className="regional-controls panel">
         <label>
           State or union territory
@@ -1906,8 +1929,8 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
               <b>{selectedDashboard.region.name}</b>
               <p>
                 {selectedLiveData?.provider
-                  ? `Regional status powered by ${selectedLiveData.provider}. Real-time measurements and verified official notices are active.`
-                  : 'Loading verified regional data and official feeds…'}
+                  ? 'Weather and air quality use public model measurements. Other cards are Civic Pulse records or official directory links.'
+                  : 'Loading regional information…'}
               </p>
             </div>
             <small>
@@ -1918,6 +1941,18 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
                 : 'Verified'}
             </small>
           </div>
+          <div className="regional-summary-grid" aria-label="Regional status summary">
+            {['Weather and rainfall', 'Traffic and roads', 'Public transport', 'Water supply', 'Air quality', 'Emergency and disaster alerts'].map((summaryCategory) => {
+              const item = displayCategories.find((entry) => entry.category === summaryCategory)
+              return item ? (
+                <article className="panel regional-summary-card" key={summaryCategory}>
+                  <span>{summaryCategory}</span>
+                  <b>{regionalStatusLabel(item)}</b>
+                  <p>{item.summary}</p>
+                </article>
+              ) : null
+            })}
+          </div>
           <div className="regional-layout">
             <section className="regional-main">
               <div className="regional-status-grid">
@@ -1927,21 +1962,21 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <h3>{item.category}</h3>
                         <span className={`status-tag status-${item.status}`}>
-                          {(item.status || 'unavailable').replaceAll('_', ' ')}
+                          {regionalStatusLabel(item)}
                         </span>
                       </div>
-                      <button
+                      {REFRESHABLE_REGIONAL_CATEGORIES.has(item.category) && <button
                         type="button"
                         className="button-icon-subtle"
                         title={`Refresh ${item.category} data`}
-                        disabled={refreshingCategory === item.category}
+                        disabled={!REFRESHABLE_REGIONAL_CATEGORIES.has(item.category) || refreshingCategory === item.category}
                         onClick={(e) => {
                           e.stopPropagation()
                           void refreshCategory(item.category)
                         }}
                       >
                         <RefreshCw size={11} className={refreshingCategory === item.category ? 'spin' : ''} />
-                      </button>
+                      </button>}
                     </div>
                     <p>{item.summary}</p>
                     {item.source_url ? (
@@ -1984,7 +2019,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
                         {selectedLiveData?.categories?.[item.category]?.retrieved_at && (
                           <small>Retrieved {selectedLiveData.categories[item.category].retrieved_at} · measurement timestamp is shown above.</small>
                         )}
-                        {categoryDetailError && <p className="inline-error" role="status">{categoryDetailError}</p>}
+                        {categoryDetailError && <p className="regional-citizen-notice" role="status">Information is temporarily unavailable. Please try again later.</p>}
                         {!categoryDetail && !categoryDetailError && (
                           <p className="privacy-note">Loading category sources and reports…</p>
                         )}
@@ -1996,9 +2031,14 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
                               onNavigate={onNavigate}
                             />
                             <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--border)' }}>
-                              <p>{categoryDetail.official_feed_status}</p>
-                              <p><b>Alternative status:</b> {categoryDetail.availability}. {categoryDetail.alternative_guidance}</p>
-                              <small>Official source scope: {categoryDetail.source_region_scope}. Portal review dates below are not data-update timestamps.</small>
+                              <p className="regional-detail-note">
+                                {item.category === 'Weather and rainfall' || item.category === 'Air quality'
+                                  ? 'Measurements are supplied by a public Open-Meteo model endpoint and are not government station readings.'
+                                  : item.category === 'Civic complaints' || item.category === 'Road damage'
+                                  ? 'These are citizen reports stored in Civic Pulse. They are not automatically submitted to a government department.'
+                                  : 'This is a directory of official information. Current availability, hours, prices, and application status must be confirmed on the linked portal.'}
+                              </p>
+                              <small>Information scope: {categoryDetail.source_region_scope}.</small>
                               <div>
                                 {categoryDetail.official_sources.length ? (
                                   categoryDetail.official_sources.map((source) => (
@@ -2016,7 +2056,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
                                     </article>
                                   ))
                                 ) : (
-                                  <p>No verified official service portal is configured for this category. No availability, price, opening hour, or reservation status is shown.</p>
+                                  <p>Official information is temporarily unavailable for this category.</p>
                                 )}
                               </div>
                               <button type="button" className="button-secondary" onClick={() => refreshCategoryDetails(item.category)}>
@@ -2172,7 +2212,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
                 {comparison && (
                   <div className="regional-compare-result">
                     <b>{selected?.name} / {comparison.region.name}</b>
-                    {dashboard.categories.map((item) => {
+                    {displayCategories.map((item) => {
                       const match = comparison.categories.find((other) => other.category === item.category)
                       return (
                         <p key={item.category}>{item.category}: {item.status} / {match?.status || 'unavailable'}</p>
@@ -2186,7 +2226,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
                 <p className="eyebrow">IN-APP ALERT PREFERENCES</p>
                 <p>Select categories to include in a subscription; leaving all unchecked subscribes to all categories.</p>
                 <div>
-                  {dashboard.categories.map((item) => (
+                  {displayCategories.map((item) => (
                     <label key={item.category}>
                       <input
                         type="checkbox"
@@ -2219,7 +2259,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
                   )}
                 </section>
               )}
-              <section className="panel regional-admin">
+              {adminSession && <section className="panel regional-admin">
                 <p className="eyebrow">INDIVIDUAL ADMINISTRATOR ACCESS</p>
                 {!adminSession ? (
                   <form onSubmit={loginAdmin}>
@@ -2325,14 +2365,648 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
                     )}
                   </>
                 )}
-              </section>
+              </section>}
             </aside>
           </div>
         </>
       )}
       <p className="privacy-note">
-        <ShieldCheck size={13} /> Weather and air quality use Open-Meteo's current model measurements and forecast timestamps. Other categories display verified official regional notices, municipal telemetry, and authenticated portals.
+        <ShieldCheck size={13} /> Weather and air quality are public model measurements. Civic complaints and road damage are citizen-submitted Civic Pulse records; directory cards link to official portals and do not claim live government status.
       </p>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PART B: NEW CIVIC MODULES
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Shared helper ────────────────────────────────────────────────────────────
+function SourceBadge({ source, url }) {
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" className="source-badge-link">
+      <ShieldCheck size={12} /> {source} <ExternalLink size={11} />
+    </a>
+  )
+}
+
+// ── Government Recruitment Radar ─────────────────────────────────────────────
+function GovJobs({ sessionToken, onNavigate }) {
+  const [jobs, setJobs] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [q, setQ] = useState('')
+  const [category, setCategory] = useState('')
+  const [expanded, setExpanded] = useState(null)
+
+  useEffect(() => {
+    setLoading(true)
+    request('/gov-jobs')
+      .then(d => { setJobs(d.jobs || []); setError('') })
+      .catch(() => setError('Could not load job listings. Please try again.'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const categories = [...new Set(jobs.map(j => j.category))].sort()
+  const filtered = jobs.filter(j => {
+    const qOk = !q || j.title.toLowerCase().includes(q.toLowerCase()) || j.organization.toLowerCase().includes(q.toLowerCase())
+    const cOk = !category || j.category === category
+    return qOk && cOk
+  })
+
+  return (
+    <div className="module-page">
+      <PageHeading eyebrow="DISCOVER" title="Recruitment Radar" description="Official government job and exam notifications. Always verify current details on the official notification link." />
+      <div className="panel" style={{ marginBottom: '1.5rem', padding: '1rem 1.25rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flex: 1, minWidth: '180px' }}>
+            <Search size={16} style={{ color: 'var(--muted)' }} />
+            <input className="text-input" placeholder="Search job title or organisation…" value={q} onChange={e => setQ(e.target.value)} style={{ flex: 1, padding: '0.5rem 0.6rem' }} />
+          </span>
+          <select className="text-input" value={category} onChange={e => setCategory(e.target.value)} style={{ padding: '0.5rem 0.6rem' }}>
+            <option value="">All categories</option>
+            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      </div>
+      {loading && <div className="state-loading"><LoaderCircle size={22} className="spin" /> Loading…</div>}
+      {error && <div className="state-error">{error}</div>}
+      {!loading && !error && filtered.length === 0 && <div className="state-empty">No jobs match your search.</div>}
+      <div className="gov-jobs-grid">
+        {filtered.map(job => (
+          <div key={job.id} className={`job-card panel ${expanded === job.id ? 'expanded' : ''}`}>
+            <div className="job-card-header" onClick={() => setExpanded(expanded === job.id ? null : job.id)}>
+              <span className={`module-icon orange`} style={{ width: 36, height: 36 }}><Briefcase size={18} /></span>
+              <div style={{ flex: 1 }}>
+                <strong>{job.title}</strong>
+                <small style={{ display: 'block', color: 'var(--muted)' }}>{job.organization}</small>
+              </div>
+              <span className="job-status-badge">{job.category}</span>
+              <ChevronDown size={16} style={{ color: 'var(--muted)', transform: expanded === job.id ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+            </div>
+            {expanded === job.id && (
+              <div className="job-card-body">
+                {job.qualification && <p><strong>Qualification:</strong> {job.qualification}</p>}
+                {job.age_limit && <p><strong>Age limit:</strong> {job.age_limit}</p>}
+                {job.vacancies > 0 && <p><strong>Vacancies:</strong> {job.vacancies}</p>}
+                {job.application_end && <p><strong>Last date to apply:</strong> {job.application_end}</p>}
+                {job.exam_date && <p><strong>Exam date:</strong> {job.exam_date}</p>}
+                <p className="state-note" style={{ marginTop: '0.5rem' }}>⚠ Figures shown may not reflect the latest notification. Always check the official link.</p>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+                  {job.notification_url && <a href={job.notification_url} target="_blank" rel="noopener noreferrer" className="button-primary" style={{ fontSize: '0.8rem', padding: '0.4rem 0.9rem' }}>Official Notification <ExternalLink size={12} /></a>}
+                  {job.portal_url && job.portal_url !== job.notification_url && <a href={job.portal_url} target="_blank" rel="noopener noreferrer" className="button-secondary" style={{ fontSize: '0.8rem', padding: '0.4rem 0.9rem' }}>Apply Portal <ExternalLink size={12} /></a>}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="eyebrow" style={{ marginTop: '2rem', textAlign: 'center' }}>
+        Source: Official recruitment portals · Data reflects seed information — verify deadlines and vacancies on the official notification link.
+      </p>
+    </div>
+  )
+}
+
+// ── Land & Property Services ──────────────────────────────────────────────────
+function LandProperty({ onNavigate }) {
+  const services = [
+    { id: 'rtc', title: 'RTC / Pahani (Land Record)', icon: FileText, color: 'green', desc: 'View Record of Rights, Tenancy and Crops for agricultural land in Karnataka.', url: 'https://landrecords.karnataka.gov.in/', urlLabel: 'Bhoomi Portal', steps: ['Visit landrecords.karnataka.gov.in', 'Select district, Taluk, Hobli, Village', 'Enter survey number', 'View or download RTC'] },
+    { id: 'mutation', title: 'Mutation (Khata Change)', icon: RefreshCw, color: 'blue', desc: 'Transfer land ownership records after purchase, inheritance or gift deed.', url: 'https://landrecords.karnataka.gov.in/', urlLabel: 'Bhoomi / Tahsildar', steps: ['Obtain registered sale deed or gift deed', 'Apply at Tahsildar / Nadakacheri or Bhoomi portal', 'Pay prescribed fee', 'Track mutation status online'] },
+    { id: 'ec', title: 'Encumbrance Certificate (EC)', icon: ShieldCheck, color: 'violet', desc: 'Confirm no mortgage or legal dues exist against a property.', url: 'https://kaveri.karnataka.gov.in/', urlLabel: 'Kaveri Online', steps: ['Visit kaveri.karnataka.gov.in', 'Select Encumbrance Certificate', 'Enter property / document details', 'Pay fee and download EC'] },
+    { id: 'property-reg', title: 'Property Registration', icon: FileCheck2, color: 'orange', desc: 'Register sale, gift or will deeds at the Sub-Registrar office.', url: 'https://kaveri.karnataka.gov.in/', urlLabel: 'Kaveri Online', steps: ['Prepare sale deed with legal help', 'Pay stamp duty and registration fee', 'Book appointment on Kaveri Online', 'Appear at Sub-Registrar office with witnesses and originals'] },
+    { id: 'bbmp-tax', title: 'BBMP Property Tax (Bengaluru)', icon: Building2, color: 'green', desc: 'Pay and manage property tax for BBMP-jurisdiction properties.', url: 'https://bbmptax.karnataka.gov.in/', urlLabel: 'BBMP Tax Portal', steps: ['Visit bbmptax.karnataka.gov.in', 'Enter SAS Application Number', 'Verify tax calculation', 'Pay online and download receipt'] },
+    { id: 'rera', title: 'Karnataka RERA — Verify Builder / Project', icon: ShieldCheck, color: 'blue', desc: 'Check if a builder and project are RERA-registered before buying.', url: 'https://rera.karnataka.gov.in/', urlLabel: 'RERA Karnataka', steps: ['Visit rera.karnataka.gov.in', 'Search by project name or registration number', 'View registration details and approvals', 'File complaints if developer is non-compliant'] },
+  ]
+  const [expanded, setExpanded] = useState(null)
+  return (
+    <div className="module-page">
+      <PageHeading eyebrow="CITIZEN SERVICES" title="Land & Property" description="Karnataka land records, property registration and encumbrance certificate services. All links lead to official government portals." />
+      <div className="land-service-cards">
+        {services.map(svc => {
+          const Icon = svc.icon
+          return (
+            <div key={svc.id} className="panel service-card-block">
+              <button className="service-card-header" onClick={() => setExpanded(expanded === svc.id ? null : svc.id)}>
+                <span className={`module-icon ${svc.color}`} style={{ width: 36, height: 36 }}><Icon size={18} /></span>
+                <div style={{ flex: 1, textAlign: 'left' }}>
+                  <strong>{svc.title}</strong>
+                  <small style={{ display: 'block', color: 'var(--muted)' }}>{svc.desc}</small>
+                </div>
+                <ChevronDown size={16} style={{ color: 'var(--muted)', transform: expanded === svc.id ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }} />
+              </button>
+              {expanded === svc.id && (
+                <div style={{ padding: '0.75rem 1rem 1rem', borderTop: '1px solid var(--border)' }}>
+                  <ol style={{ paddingLeft: '1.2rem', margin: '0 0 0.75rem', color: 'var(--text)' }}>
+                    {svc.steps.map((step, i) => <li key={i} style={{ marginBottom: '0.4rem', fontSize: '0.9rem' }}>{step}</li>)}
+                  </ol>
+                  <a href={svc.url} target="_blank" rel="noopener noreferrer" className="button-primary" style={{ fontSize: '0.82rem', padding: '0.4rem 1rem' }}>{svc.urlLabel} <ExternalLink size={12} /></a>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <div className="panel" style={{ marginTop: '1.5rem', padding: '1rem 1.25rem', background: 'var(--teal-pale)' }}>
+        <p className="eyebrow" style={{ marginBottom: '0.4rem' }}>NEED AI GUIDANCE?</p>
+        <p style={{ fontSize: '0.9rem', color: 'var(--text)', margin: 0 }}>For step-by-step help with land or property services in Karnataka, ask <button className="text-button" onClick={() => onNavigate('janavani')}>Janavani AI</button>.</p>
+      </div>
+    </div>
+  )
+}
+
+// ── Government Health Services ────────────────────────────────────────────────
+function HealthServices({ profile, onNavigate }) {
+  const schemes = [
+    { name: 'Ayushman Bharat – PM-JAY', desc: '₹5 lakh health coverage per family per year at empanelled hospitals.', url: 'https://beneficiary.nha.gov.in/', urlLabel: 'Check eligibility', color: 'green' },
+    { name: 'Karnataka Arogya Karnataka', desc: 'State health assurance scheme for Karnataka BPL families not covered by PM-JAY.', url: 'https://sast.karnataka.gov.in/', urlLabel: 'SAST Portal', color: 'blue' },
+    { name: 'Janani Suraksha Yojana (JSY)', desc: 'Cash assistance for pregnant BPL women delivering at government facilities.', url: 'https://nhm.gov.in/', urlLabel: 'NHM Portal', color: 'orange' },
+    { name: 'ASHA Worker Services', desc: 'Community health worker support for maternal, child and preventive health in rural areas.', url: 'https://nhm.gov.in/', urlLabel: 'NHM', color: 'violet' },
+  ]
+  const resources = [
+    { label: 'Karnataka Health Department', url: 'https://hfw.karnataka.gov.in/' },
+    { label: 'BBMP Health Services', url: 'https://bbmponline.karnataka.gov.in/' },
+    { label: 'National Health Mission', url: 'https://nhm.gov.in/' },
+    { label: 'Ayushman Bharat Digital Mission', url: 'https://abdm.gov.in/' },
+    { label: 'eSanjeevani (Telemedicine)', url: 'https://esanjeevaniopd.in/' },
+    { label: 'Blood Bank Directory (NHM)', url: 'https://www.notto.abdm.gov.in/' },
+  ]
+  return (
+    <div className="module-page">
+      <PageHeading eyebrow="CITIZEN SERVICES" title="Government Health Services" description="Official government health schemes and facility links for Karnataka and central government programmes." />
+      <div className="panel" style={{ padding: '1rem 1.25rem', marginBottom: '1.5rem', background: 'var(--teal-pale)', borderLeft: '4px solid var(--teal)' }}>
+        <p style={{ margin: 0, fontSize: '0.9rem' }}><strong>⚠ Medical Disclaimer:</strong> This module provides links to official government health programmes and portals. It does not provide medical advice, diagnosis or treatment. Always consult a registered healthcare provider for medical decisions.</p>
+      </div>
+      <div className="section-title-row"><div><p className="eyebrow">HEALTH SCHEMES</p><h2>Key government health programmes</h2></div></div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: '1rem', marginBottom: '2rem' }}>
+        {schemes.map(s => (
+          <div key={s.name} className="panel" style={{ padding: '1rem 1.1rem' }}>
+            <span className={`module-icon ${s.color}`} style={{ marginBottom: '0.6rem' }}><HeartPulse size={18} /></span>
+            <strong style={{ display: 'block', marginBottom: '0.3rem' }}>{s.name}</strong>
+            <p style={{ fontSize: '0.88rem', color: 'var(--text)', margin: '0 0 0.75rem' }}>{s.desc}</p>
+            <a href={s.url} target="_blank" rel="noopener noreferrer" className="button-secondary" style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem' }}>{s.urlLabel} <ExternalLink size={11} /></a>
+          </div>
+        ))}
+      </div>
+      <div className="section-title-row"><div><p className="eyebrow">OFFICIAL RESOURCES</p><h2>Health portals & directories</h2></div></div>
+      <div className="panel" style={{ padding: '0.5rem 0' }}>
+        {resources.map(r => (
+          <a key={r.label} href={r.url} target="_blank" rel="noopener noreferrer" className="quick-row" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <span className="quick-icon green"><HeartPulse size={15} /></span>
+            <span style={{ flex: 1 }}><b>{r.label}</b></span>
+            <ExternalLink size={14} style={{ color: 'var(--muted)' }} />
+          </a>
+        ))}
+      </div>
+      <div className="panel" style={{ marginTop: '1.5rem', padding: '1rem 1.25rem', background: 'var(--teal-pale)' }}>
+        <p className="eyebrow" style={{ marginBottom: '0.4rem' }}>NEED AI GUIDANCE?</p>
+        <p style={{ fontSize: '0.9rem', color: 'var(--text)', margin: 0 }}>Ask <button className="text-button" onClick={() => onNavigate('janavani')}>Janavani AI</button> about health scheme eligibility, required documents and official application steps.</p>
+      </div>
+    </div>
+  )
+}
+
+// ── Farmer & Agriculture Services ─────────────────────────────────────────────
+function AgriServices({ sessionToken, onNavigate }) {
+  const [schemes, setSchemes] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [q, setQ] = useState('')
+  const [expanded, setExpanded] = useState(null)
+
+  useEffect(() => {
+    setLoading(true)
+    request('/gov-schemes?category=farmer')
+      .then(d => { setSchemes(d.schemes || []); setError('') })
+      .catch(() => setError('Could not load farmer schemes. Please try again.'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const resources = [
+    { label: 'PM-KISAN Portal', url: 'https://pmkisan.gov.in/', desc: 'Check beneficiary status and instalment details.' },
+    { label: 'PM Fasal Bima Yojana', url: 'https://pmfby.gov.in/', desc: 'Crop insurance scheme — enrol before seasonal deadline.' },
+    { label: 'Karnataka Raitha Seva Kendra', url: 'https://raitamitra.karnataka.gov.in/', desc: 'Karnataka Agriculture Department farmer services.' },
+    { label: 'eNAM – National Agriculture Market', url: 'https://www.enam.gov.in/', desc: 'Online trading platform for agricultural commodities.' },
+    { label: 'Soil Health Card Portal', url: 'https://soilhealth.dac.gov.in/', desc: 'Get soil health card and crop-wise fertilizer recommendations.' },
+    { label: 'Kisan Call Centre', url: 'tel:18001801551', desc: 'Free helpline for farmer queries: 1800-180-1551' },
+  ]
+
+  const filtered = schemes.filter(s => !q || s.name.toLowerCase().includes(q.toLowerCase()) || s.benefits.toLowerCase().includes(q.toLowerCase()))
+
+  return (
+    <div className="module-page">
+      <PageHeading eyebrow="DISCOVER" title="Farmer Services" description="Agriculture schemes, subsidies and official resources for farmers in Karnataka and across India." />
+      <div className="section-title-row"><div><p className="eyebrow">AGRICULTURAL SCHEMES</p><h2>Central & Karnataka farmer programmes</h2></div></div>
+      <div style={{ marginBottom: '1rem' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', maxWidth: 400 }}>
+          <Search size={16} style={{ color: 'var(--muted)' }} />
+          <input className="text-input" placeholder="Search schemes…" value={q} onChange={e => setQ(e.target.value)} style={{ flex: 1, padding: '0.5rem 0.6rem' }} />
+        </span>
+      </div>
+      {loading && <div className="state-loading"><LoaderCircle size={22} className="spin" /> Loading…</div>}
+      {error && <div className="state-error">{error}</div>}
+      <div className="agri-scheme-grid">
+        {filtered.map(s => (
+          <div key={s.id} className="panel" style={{ padding: '1rem 1.1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '0.4rem' }}>
+              <strong style={{ fontSize: '0.95rem' }}>{s.name}</strong>
+              <span className="job-status-badge">{s.level}</span>
+            </div>
+            <p style={{ fontSize: '0.88rem', color: 'var(--text)', margin: '0 0 0.5rem' }}>{s.description}</p>
+            {s.benefits && <p style={{ fontSize: '0.84rem', color: 'var(--muted)', margin: '0 0 0.75rem' }}><strong>Benefit:</strong> {s.benefits}</p>}
+            {s.deadline && <p style={{ fontSize: '0.82rem', color: 'var(--muted)', margin: '0 0 0.5rem' }}><Clock3 size={12} /> {s.deadline}</p>}
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {s.application_url && <a href={s.application_url} target="_blank" rel="noopener noreferrer" className="button-secondary" style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem' }}>Official Portal <ExternalLink size={11} /></a>}
+            </div>
+            {s.verified_on && <small style={{ display: 'block', color: 'var(--muted)', marginTop: '0.5rem' }}>Verified: {s.verified_on} · Source: {s.source}</small>}
+          </div>
+        ))}
+      </div>
+      <div className="section-title-row" style={{ marginTop: '2rem' }}><div><p className="eyebrow">RESOURCES</p><h2>Official agriculture portals</h2></div></div>
+      <div className="panel" style={{ padding: '0.5rem 0' }}>
+        {resources.map(r => (
+          <a key={r.label} href={r.url} target="_blank" rel="noopener noreferrer" className="quick-row" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <span className="quick-icon green"><Leaf size={15} /></span>
+            <span style={{ flex: 1 }}><b>{r.label}</b><small style={{ display: 'block', color: 'var(--muted)' }}>{r.desc}</small></span>
+            <ExternalLink size={14} style={{ color: 'var(--muted)' }} />
+          </a>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Business Hub ──────────────────────────────────────────────────────────────
+function BusinessHub({ onNavigate }) {
+  const portals = [
+    { name: 'Startup India — DPIIT Recognition', desc: 'Get DPIIT recognition for tax benefits, self-certification and government procurement preference.', url: 'https://www.startupindia.gov.in/', color: 'blue', category: 'Startup' },
+    { name: 'Udyam Registration (MSME)', desc: 'Free online MSME registration for micro, small and medium enterprises.', url: 'https://udyamregistration.gov.in/', color: 'green', category: 'MSME' },
+    { name: 'Government e-Marketplace (GeM)', desc: 'Sell products and services directly to government buyers with no middlemen.', url: 'https://gem.gov.in/', color: 'orange', category: 'Tender / Procurement' },
+    { name: 'MUDRA Loan', desc: 'Collateral-free loans for small businesses up to ₹10 lakh via scheduled banks.', url: 'https://www.mudra.org.in/', color: 'violet', category: 'Loan' },
+    { name: 'JanSamarth — Credit-Linked Schemes', desc: 'Discover and apply for government credit-linked schemes for agriculture, education and business.', url: 'https://www.jansamarth.in/', color: 'blue', category: 'Loan' },
+    { name: 'Central Public Procurement Portal (CPPP)', desc: 'Find central government tenders and e-procurement notices across all ministries.', url: 'https://eprocure.gov.in/', color: 'orange', category: 'Tender / Procurement' },
+    { name: 'Karnataka Udyog Mitra', desc: 'Single-window clearance for industries and businesses setting up in Karnataka.', url: 'https://udyogmitra.karnataka.gov.in/', color: 'green', category: 'Karnataka' },
+    { name: 'KSIDC — Karnataka Small Industries', desc: 'Financial assistance and infrastructure for small-scale industries in Karnataka.', url: 'https://www.ksidc.org/', color: 'blue', category: 'Karnataka' },
+    { name: 'KVIC / PMEGP', desc: 'Prime Minister Employment Generation Programme — grants for village and khadi industries.', url: 'https://www.kviconline.gov.in/pmegpeportal/', color: 'green', category: 'Startup' },
+    { name: 'Trade Mark Registry — Apply', desc: 'Register your brand trademark through the official IP India portal.', url: 'https://ipindia.gov.in/', color: 'violet', category: 'Compliance' },
+    { name: 'MCA21 — Company / LLP Registration', desc: 'Register a company or LLP through the Ministry of Corporate Affairs portal.', url: 'https://www.mca.gov.in/', color: 'orange', category: 'Compliance' },
+    { name: 'GST Registration', desc: 'Register for Goods and Services Tax on the official GST portal.', url: 'https://www.gst.gov.in/', color: 'blue', category: 'Compliance' },
+  ]
+  const [category, setCategory] = useState('')
+  const categories = [...new Set(portals.map(p => p.category))].sort()
+  const filtered = category ? portals.filter(p => p.category === category) : portals
+
+  return (
+    <div className="module-page">
+      <PageHeading eyebrow="DISCOVER" title="Business Hub" description="Official portals for startups, MSMEs, tenders, loans and government procurement in India." />
+      <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <button className={`button-secondary${!category ? ' active' : ''}`} onClick={() => setCategory('')} style={{ fontSize: '0.82rem', padding: '0.35rem 0.9rem' }}>All</button>
+        {categories.map(c => <button key={c} className={`button-secondary${category === c ? ' active' : ''}`} onClick={() => setCategory(c)} style={{ fontSize: '0.82rem', padding: '0.35rem 0.9rem' }}>{c}</button>)}
+      </div>
+      <div className="business-card-grid">
+        {filtered.map(p => (
+          <div key={p.name} className="panel business-card" style={{ padding: '1rem 1.1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.4rem' }}>
+              <span className={`module-icon ${p.color}`} style={{ width: 32, height: 32 }}><TrendingUp size={16} /></span>
+              <span className="job-status-badge">{p.category}</span>
+            </div>
+            <strong style={{ display: 'block', marginBottom: '0.3rem' }}>{p.name}</strong>
+            <p style={{ fontSize: '0.88rem', color: 'var(--text)', margin: '0 0 0.75rem' }}>{p.desc}</p>
+            <a href={p.url} target="_blank" rel="noopener noreferrer" className="button-secondary" style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem' }}>Open Portal <ExternalLink size={11} /></a>
+          </div>
+        ))}
+      </div>
+      <div className="panel" style={{ marginTop: '1.5rem', padding: '1rem 1.25rem', background: 'var(--teal-pale)' }}>
+        <p className="eyebrow" style={{ marginBottom: '0.4rem' }}>BUSINESS AI GUIDANCE</p>
+        <p style={{ fontSize: '0.9rem', color: 'var(--text)', margin: 0 }}>Ask <button className="text-button" onClick={() => onNavigate('janavani')}>Janavani AI</button> about MSME eligibility, Startup India registration steps or GeM seller onboarding.</p>
+      </div>
+    </div>
+  )
+}
+
+// ── Karnataka Services Directory ──────────────────────────────────────────────
+function KarnatakaDir({ onNavigate }) {
+  const [services, setServices] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [q, setQ] = useState('')
+  const [category, setCategory] = useState('')
+  const [expanded, setExpanded] = useState(null)
+
+  useEffect(() => {
+    setLoading(true)
+    request('/karnataka-services')
+      .then(d => { setServices(d.services || []); setError('') })
+      .catch(() => setError('Could not load Karnataka services. Please try again.'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const categories = [...new Set(services.map(s => s.category))].sort()
+  const filtered = services.filter(s => {
+    const qOk = !q || s.service_name.toLowerCase().includes(q.toLowerCase()) || s.department.toLowerCase().includes(q.toLowerCase())
+    const cOk = !category || s.category === category
+    return qOk && cOk
+  })
+
+  return (
+    <div className="module-page">
+      <PageHeading eyebrow="CITIZEN SERVICES" title="Karnataka Services Directory" description="Verified Karnataka government services — portals, contacts and procedure guides." />
+      <div className="panel" style={{ marginBottom: '1.5rem', padding: '1rem 1.25rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flex: 1, minWidth: '180px' }}>
+            <Search size={16} style={{ color: 'var(--muted)' }} />
+            <input className="text-input" placeholder="Search services or departments…" value={q} onChange={e => setQ(e.target.value)} style={{ flex: 1, padding: '0.5rem 0.6rem' }} />
+          </span>
+          <select className="text-input" value={category} onChange={e => setCategory(e.target.value)} style={{ padding: '0.5rem 0.6rem' }}>
+            <option value="">All categories</option>
+            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      </div>
+      {loading && <div className="state-loading"><LoaderCircle size={22} className="spin" /> Loading…</div>}
+      {error && <div className="state-error">{error}</div>}
+      {!loading && !error && filtered.length === 0 && <div className="state-empty">No services match your search.</div>}
+      <div className="karnataka-dept-list">
+        {filtered.map(svc => (
+          <div key={svc.id} className="panel service-card-block">
+            <button className="service-card-header" onClick={() => setExpanded(expanded === svc.id ? null : svc.id)}>
+              <span className="module-icon blue" style={{ width: 36, height: 36 }}><Landmark size={17} /></span>
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <strong>{svc.service_name}</strong>
+                <small style={{ display: 'block', color: 'var(--muted)' }}>{svc.department} · {svc.category}</small>
+              </div>
+              <ChevronDown size={16} style={{ color: 'var(--muted)', transform: expanded === svc.id ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }} />
+            </button>
+            {expanded === svc.id && (
+              <div style={{ padding: '0.75rem 1rem 1rem', borderTop: '1px solid var(--border)' }}>
+                <p style={{ fontSize: '0.9rem', margin: '0 0 0.5rem' }}>{svc.description}</p>
+                {svc.fees && <p style={{ fontSize: '0.85rem', color: 'var(--muted)', margin: '0 0 0.5rem' }}><strong>Fees:</strong> {svc.fees}</p>}
+                {svc.contact && <p style={{ fontSize: '0.85rem', color: 'var(--muted)', margin: '0 0 0.75rem' }}><strong>Contact:</strong> {svc.contact}</p>}
+                <a href={svc.portal_url} target="_blank" rel="noopener noreferrer" className="button-primary" style={{ fontSize: '0.82rem', padding: '0.4rem 1rem' }}>Visit Portal <ExternalLink size={12} /></a>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Government Application Tracker ────────────────────────────────────────────
+const APP_STATUS_OPTIONS = ['Draft', 'Submitted', 'Under Verification', 'Documents Required', 'Pending Approval', 'Approved', 'Rejected', 'Certificate Issued', 'Completed']
+const APP_STATUS_COLORS = { Draft: 'var(--muted)', Submitted: '#2563eb', 'Under Verification': '#d97706', 'Documents Required': '#dc2626', 'Pending Approval': '#7c3aed', Approved: '#16a34a', Rejected: '#dc2626', 'Certificate Issued': '#0d9488', Completed: '#16a34a' }
+
+function AppTracker({ sessionToken, backendOnline }) {
+  const [apps, setApps] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ department: '', application_type: '', reference_number: '', submission_date: '', status: 'Draft', notes: '', official_url: '' })
+  const [saving, setSaving] = useState(false)
+
+  function load() {
+    if (!sessionToken) return
+    setLoading(true)
+    request('/app-tracking', { headers: { 'X-Civic-Session': sessionToken } })
+      .then(d => { setApps(d.applications || []); setError('') })
+      .catch(() => setError('Could not load applications.'))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { load() }, [sessionToken])
+
+  async function addApp(e) {
+    e.preventDefault()
+    if (!form.department || !form.application_type) return
+    setSaving(true)
+    try {
+      await request('/app-tracking', { method: 'POST', headers: { 'X-Civic-Session': sessionToken }, body: form })
+      setForm({ department: '', application_type: '', reference_number: '', submission_date: '', status: 'Draft', notes: '', official_url: '' })
+      setShowForm(false)
+      load()
+    } catch {
+      setError('Could not save application. Please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function updateStatus(id, status) {
+    try {
+      await request(`/app-tracking/${id}`, { method: 'PUT', headers: { 'X-Civic-Session': sessionToken }, body: { status } })
+      load()
+    } catch { /* silent */ }
+  }
+
+  async function deleteApp(id) {
+    if (!window.confirm('Remove this application from your tracker?')) return
+    try {
+      await request(`/app-tracking/${id}`, { method: 'DELETE', headers: { 'X-Civic-Session': sessionToken } })
+      load()
+    } catch { /* silent */ }
+  }
+
+  if (!sessionToken) {
+    return (
+      <div className="module-page">
+        <PageHeading eyebrow="MY SERVICES" title="Application Tracker" description="Track all your government applications in one place." />
+        <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+          <p>Sign in to save and track your government applications.</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="module-page">
+      <PageHeading eyebrow="MY SERVICES" title="Application Tracker" description="Track your government certificate, scheme and document applications." action={
+        <button className="button-primary" onClick={() => setShowForm(!showForm)}>{showForm ? 'Cancel' : '+ Add Application'}</button>
+      } />
+      {showForm && (
+        <form className="panel" onSubmit={addApp} style={{ padding: '1.25rem', marginBottom: '1.5rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: '0.75rem', marginBottom: '0.75rem' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem' }}>
+              Department *
+              <input className="text-input" value={form.department} onChange={e => setForm(f => ({ ...f, department: e.target.value }))} placeholder="e.g. Revenue Dept" required />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem' }}>
+              Application Type *
+              <input className="text-input" value={form.application_type} onChange={e => setForm(f => ({ ...f, application_type: e.target.value }))} placeholder="e.g. Income Certificate" required />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem' }}>
+              Reference / Application Number
+              <input className="text-input" value={form.reference_number} onChange={e => setForm(f => ({ ...f, reference_number: e.target.value }))} placeholder="Optional" />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem' }}>
+              Submission Date
+              <input className="text-input" type="date" value={form.submission_date} onChange={e => setForm(f => ({ ...f, submission_date: e.target.value }))} />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem' }}>
+              Status
+              <select className="text-input" value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
+                {APP_STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem' }}>
+              Official Tracking URL
+              <input className="text-input" value={form.official_url} onChange={e => setForm(f => ({ ...f, official_url: e.target.value }))} placeholder="Optional" />
+            </label>
+          </div>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem', marginBottom: '0.75rem' }}>
+            Notes
+            <textarea className="text-input" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} style={{ resize: 'vertical' }} />
+          </label>
+          <button type="submit" className="button-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Application'}</button>
+        </form>
+      )}
+      {loading && <div className="state-loading"><LoaderCircle size={22} className="spin" /> Loading…</div>}
+      {error && <div className="state-error">{error}</div>}
+      {!loading && apps.length === 0 && !showForm && <div className="state-empty">No applications tracked yet. Click "Add Application" to start.</div>}
+      <div className="tracker-list">
+        {apps.map(app => (
+          <div key={app.id} className="panel tracker-item" style={{ padding: '1rem 1.1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+              <div style={{ flex: 1 }}>
+                <strong>{app.application_type}</strong>
+                <small style={{ display: 'block', color: 'var(--muted)' }}>{app.department}{app.reference_number ? ` · Ref: ${app.reference_number}` : ''}</small>
+              </div>
+              <span style={{ color: APP_STATUS_COLORS[app.status] || 'var(--text)', fontWeight: 600, fontSize: '0.82rem', whiteSpace: 'nowrap' }}>{app.status}</span>
+            </div>
+            {app.notes && <p style={{ fontSize: '0.85rem', color: 'var(--muted)', margin: '0.4rem 0 0' }}>{app.notes}</p>}
+            {app.submission_date && <small style={{ color: 'var(--muted)' }}>Submitted: {app.submission_date}</small>}
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <select className="text-input" value={app.status} onChange={e => updateStatus(app.id, e.target.value)} style={{ fontSize: '0.8rem', padding: '0.3rem 0.5rem' }}>
+                {APP_STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
+              </select>
+              {app.official_url && <a href={app.official_url} target="_blank" rel="noopener noreferrer" className="button-secondary" style={{ fontSize: '0.78rem', padding: '0.3rem 0.7rem' }}>Track <ExternalLink size={11} /></a>}
+              <button className="icon-btn" title="Remove" onClick={() => deleteApp(app.id)} style={{ color: '#dc2626', marginLeft: 'auto' }}><X size={15} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Opportunity Dashboard (unified) ───────────────────────────────────────────
+function OppDashboard({ sessionToken, profile, onNavigate }) {
+  const [tab, setTab] = useState('schemes')
+  const [schemes, setSchemes] = useState([])
+  const [jobs, setJobs] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [q, setQ] = useState('')
+  const [levelFilter, setLevelFilter] = useState('')
+  const [catFilter, setCatFilter] = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    Promise.all([request('/gov-schemes'), request('/gov-jobs')])
+      .then(([sd, jd]) => { setSchemes(sd.schemes || []); setJobs(jd.jobs || []) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const schemeCategories = [...new Set(schemes.map(s => s.category))].sort()
+  const jobCategories = [...new Set(jobs.map(j => j.category))].sort()
+
+  const filteredSchemes = schemes.filter(s => {
+    const qOk = !q || s.name.toLowerCase().includes(q.toLowerCase()) || s.audience.toLowerCase().includes(q.toLowerCase())
+    const lOk = !levelFilter || s.level === levelFilter
+    const cOk = !catFilter || s.category === catFilter
+    return qOk && lOk && cOk
+  })
+  const filteredJobs = jobs.filter(j => {
+    const qOk = !q || j.title.toLowerCase().includes(q.toLowerCase()) || j.organization.toLowerCase().includes(q.toLowerCase())
+    const cOk = !catFilter || j.category === catFilter
+    return qOk && cOk
+  })
+
+  async function saveScheme(scheme) {
+    if (!sessionToken) { onNavigate('janavani'); return }
+    try {
+      await request('/saved-items', { method: 'POST', headers: { 'X-Civic-Session': sessionToken }, body: { item_type: 'scheme', item_id: scheme.id, item_name: scheme.name } })
+    } catch { /* already saved or not signed in */ }
+  }
+
+  return (
+    <div className="module-page">
+      <PageHeading eyebrow="DISCOVER" title="Opportunity Dashboard" description="All government schemes, jobs and opportunities unified in one view." />
+      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem', alignItems: 'center' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flex: 1, minWidth: '180px' }}>
+          <Search size={16} style={{ color: 'var(--muted)' }} />
+          <input className="text-input" placeholder="Search…" value={q} onChange={e => { setQ(e.target.value); setCatFilter('') }} style={{ flex: 1, padding: '0.5rem 0.6rem' }} />
+        </span>
+        {tab === 'schemes' && (
+          <>
+            <select className="text-input" value={levelFilter} onChange={e => setLevelFilter(e.target.value)} style={{ padding: '0.5rem 0.6rem' }}>
+              <option value="">All levels</option>
+              <option value="Central">Central</option>
+              <option value="Karnataka">Karnataka</option>
+            </select>
+            <select className="text-input" value={catFilter} onChange={e => setCatFilter(e.target.value)} style={{ padding: '0.5rem 0.6rem' }}>
+              <option value="">All categories</option>
+              {schemeCategories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </>
+        )}
+        {tab === 'jobs' && (
+          <select className="text-input" value={catFilter} onChange={e => setCatFilter(e.target.value)} style={{ padding: '0.5rem 0.6rem' }}>
+            <option value="">All categories</option>
+            {jobCategories.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
+      </div>
+      <div className="opp-dashboard-tabs" style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
+        {[['schemes', 'Government Schemes'], ['jobs', 'Recruitment']].map(([id, label]) => (
+          <button key={id} className={`button-secondary${tab === id ? ' active' : ''}`} onClick={() => { setTab(id); setCatFilter(''); setLevelFilter('') }} style={{ fontSize: '0.85rem' }}>{label}</button>
+        ))}
+      </div>
+      {loading && <div className="state-loading"><LoaderCircle size={22} className="spin" /> Loading…</div>}
+      {tab === 'schemes' && (
+        <div className="unified-feed">
+          {filteredSchemes.length === 0 && !loading && <div className="state-empty">No schemes match your search.</div>}
+          {filteredSchemes.map(s => (
+            <div key={s.id} className="panel" style={{ padding: '1rem 1.1rem', marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                <strong style={{ fontSize: '0.95rem' }}>{s.name}</strong>
+                <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+                  <span className="job-status-badge">{s.level}</span>
+                  <span className="job-status-badge">{s.category}</span>
+                </div>
+              </div>
+              {s.audience && <p style={{ fontSize: '0.85rem', color: 'var(--muted)', margin: '0.3rem 0 0.4rem' }}>For: {s.audience}</p>}
+              <p style={{ fontSize: '0.88rem', color: 'var(--text)', margin: '0 0 0.5rem' }}>{s.description}</p>
+              {s.benefits && <p style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--teal)', margin: '0 0 0.5rem' }}>Benefit: {s.benefits}</p>}
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {s.application_url && <a href={s.application_url} target="_blank" rel="noopener noreferrer" className="button-secondary" style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem' }}>Apply / Info <ExternalLink size={11} /></a>}
+                {sessionToken && <button className="button-secondary" style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem' }} onClick={() => saveScheme(s)}><Bookmark size={12} /> Save</button>}
+              </div>
+              {s.verified_on && <small style={{ display: 'block', color: 'var(--muted)', marginTop: '0.4rem' }}>Verified: {s.verified_on} · {s.source}</small>}
+            </div>
+          ))}
+        </div>
+      )}
+      {tab === 'jobs' && (
+        <div className="unified-feed">
+          {filteredJobs.length === 0 && !loading && <div className="state-empty">No jobs match your search.</div>}
+          {filteredJobs.map(j => (
+            <div key={j.id} className="panel" style={{ padding: '1rem 1.1rem', marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                <strong style={{ fontSize: '0.95rem' }}>{j.title}</strong>
+                <span className="job-status-badge">{j.category}</span>
+              </div>
+              <p style={{ fontSize: '0.85rem', color: 'var(--muted)', margin: '0.3rem 0 0.4rem' }}>{j.organization}</p>
+              {j.qualification && <p style={{ fontSize: '0.84rem', color: 'var(--text)', margin: '0 0 0.3rem' }}><strong>Qualification:</strong> {j.qualification}</p>}
+              {j.age_limit && <p style={{ fontSize: '0.84rem', color: 'var(--muted)', margin: '0 0 0.5rem' }}><strong>Age:</strong> {j.age_limit}</p>}
+              <p style={{ fontSize: '0.78rem', color: '#dc2626', margin: '0 0 0.5rem' }}>⚠ Verify deadlines and vacancies on the official notification link.</p>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {j.notification_url && <a href={j.notification_url} target="_blank" rel="noopener noreferrer" className="button-secondary" style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem' }}>Official Notification <ExternalLink size={11} /></a>}
+                {j.portal_url && j.portal_url !== j.notification_url && <a href={j.portal_url} target="_blank" rel="noopener noreferrer" className="button-secondary" style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem' }}>Apply Portal <ExternalLink size={11} /></a>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -2340,7 +3014,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
 function AuthScreen({ onAuthenticated }) {
   const resetToken = new URLSearchParams(window.location.search).get('token')
   const [mode, setMode] = useState(resetToken ? 'reset' : 'login')
-  const [form, setForm] = useState({ fullName: '', email: '', mobile: '', password: '' })
+  const [form, setForm] = useState({ fullName: '', email: '', mobile: '', password: '', confirmPassword: '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -2367,6 +3041,14 @@ function AuthScreen({ onAuthenticated }) {
         setBusy(false)
         return
       }
+      if (mode === 'register' && form.password !== form.confirmPassword) {
+        setError('Passwords do not match.')
+        return
+      }
+      if (mode === 'register' && !/^(?:\+91)?[6-9]\d{9}$/.test(form.mobile.replace(/[^\d+]/g, ''))) {
+        setError('Please enter a valid Indian mobile number.')
+        return
+      }
       const body = mode === 'register'
         ? { full_name: form.fullName, email: form.email, mobile: form.mobile, password: form.password }
         : { email: form.email, password: form.password }
@@ -2391,6 +3073,7 @@ function AuthScreen({ onAuthenticated }) {
         {mode !== 'reset' && <label>Email address<input required type="email" maxLength="160" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="you@example.com" /></label>}
         {mode === 'register' && <label>Mobile number<input required minLength="10" maxLength="15" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+91 98765 43210" /></label>}
         {mode !== 'forgot' && <label>Password<div className="password-field"><input required minLength={mode === 'register' || mode === 'reset' ? 8 : 1} maxLength="128" type={showPassword ? 'text' : 'password'} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={mode === 'register' || mode === 'reset' ? 'At least 8 characters' : 'Enter your password'} /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? 'Hide' : 'Show'}</button></div></label>}
+        {mode === 'register' && <label>Confirm password<input required minLength="8" maxLength="128" type="password" value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} placeholder="Re-enter your password" /></label>}
         {error && <p className="inline-error">{error}</p>}
         <button className="button-primary full-button" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : null}{mode === 'login' ? 'Login securely' : mode === 'register' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : 'Reset password'}</button>
         {mode === 'login' && <button type="button" className="text-button" onClick={() => { setMode('forgot'); setError('') }}>Forgot password?</button>}

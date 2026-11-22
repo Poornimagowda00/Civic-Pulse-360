@@ -35,7 +35,7 @@ const navigationCases = [
   ['Open Civic Alert.', 'civic-alert'],
   ['Go to complaint registration.', 'civic-eye'],
   ['Show me government services.', 'janavani'],
-  ['Open scholarship portal.', 'opportunity-hub'],
+  ['Open scholarship portal.', 'scholarship-portal'],
   ['ವಿದ್ಯಾರ್ಥಿವೇತನ ಪೋರ್ಟಲ್ ತೆರೆಯಿರಿ', 'opportunity-hub'],
   ['दस्तावेज़ चेकलिस्ट खोलो', 'civic-docs'],
   ['புகார் பதிவு', 'civic-eye'],
@@ -50,11 +50,21 @@ const navigationCases = [
 
 test('routes explicit English and localized navigation commands to the matching module', () => {
   for (const [command, expectedId] of navigationCases) {
-    assert.deepEqual(resolveVoiceNavigation(command, navigationItems), {
-      type: 'navigate',
-      id: expectedId,
-      label: navigationItems.find((item) => item.id === expectedId).label,
-    }, command)
+    const result = resolveVoiceNavigation(command, navigationItems)
+    if (expectedId === 'scholarship-portal') {
+      assert.deepEqual(result, {
+        type: 'portal',
+        id: 'scholarship-portal',
+        label: 'National Scholarship Portal',
+        href: 'https://scholarships.gov.in/',
+      }, command)
+    } else {
+      assert.deepEqual(result, {
+        type: 'navigate',
+        id: expectedId,
+        label: navigationItems.find((item) => item.id === expectedId).label,
+      }, command)
+    }
   }
 })
 

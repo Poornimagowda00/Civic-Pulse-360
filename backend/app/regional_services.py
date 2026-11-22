@@ -452,7 +452,9 @@ def get_weather_status(location_query: Optional[str] = None, refresh: bool = Fal
             hourly_list.append({
                 "time": h_times[i],
                 "temperature": h_temps[i],
+                "temperature_c": h_temps[i],
                 "precipitation_probability": h_probs[i] if i < len(h_probs) else 0,
+                "precipitation_probability_pct": h_probs[i] if i < len(h_probs) else 0,
                 "condition": WMO_WEATHER_CODES.get(h_codes[i] if i < len(h_codes) else 0, "Clear"),
             })
 
@@ -469,6 +471,8 @@ def get_weather_status(location_query: Optional[str] = None, refresh: bool = Fal
                 "date": d_times[i],
                 "max_temp": d_max[i] if i < len(d_max) else None,
                 "min_temp": d_min[i] if i < len(d_min) else None,
+                "temperature_max_c": d_max[i] if i < len(d_max) else None,
+                "temperature_min_c": d_min[i] if i < len(d_min) else None,
                 "precipitation_sum_mm": d_rain[i] if i < len(d_rain) else 0.0,
                 "rain_probability_pct": d_prob[i] if i < len(d_prob) else 0,
                 "condition": WMO_WEATHER_CODES.get(d_wcode[i] if i < len(d_wcode) else 0, "Clear"),
@@ -490,8 +494,11 @@ def get_weather_status(location_query: Optional[str] = None, refresh: bool = Fal
             "last_updated": observed_at,
             "data": {
                 "temperature": temp,
+                "temperature_c": temp,
                 "feels_like": feels_like,
+                "apparent_temperature_c": feels_like,
                 "humidity": humidity,
+                "relative_humidity_pct": humidity,
                 "wind_speed_kmh": wind,
                 "rainfall_mm": precip,
                 "weather_code": wcode,
@@ -792,6 +799,7 @@ def get_air_quality_status(location_query: Optional[str] = None, refresh: bool =
             "last_updated": observed_at,
             "data": {
                 "us_aqi": us_aqi,
+                "aqi_index": us_aqi,
                 "european_aqi": eu_aqi,
                 "aqi_category": aqi_category,
                 "pollutants": {
@@ -807,6 +815,7 @@ def get_air_quality_status(location_query: Optional[str] = None, refresh: bool =
                     "action_advice": action_advice,
                     "cpcb_reference": "National Air Quality Index (NAQI) India Guidelines",
                 },
+                "health_advisory": health_implication,
                 "monitoring_station_info": "Atmospheric model estimates derived from Copernicus Atmosphere Monitoring Service (CAMS) via Open-Meteo. For ground-station data, refer to CPCB Sameer Portal.",
             },
             "summary": summary,
@@ -875,7 +884,7 @@ def get_complaints_status(connection: sqlite3.Connection, location_query: Option
             "location": f"{loc['name']}, {loc['state']}",
             "coordinates": {"latitude": loc["latitude"], "longitude": loc["longitude"]},
             "status": "live",
-            "source": "Civic Pulse Grievance Management System & Karnataka IPGRS",
+            "source": "Civic Pulse Grievance Management System",
             "source_url": "https://ipgrs.karnataka.gov.in/",
             "last_updated": now_str,
             "data": {
@@ -1393,12 +1402,6 @@ def get_road_damage_status(connection: sqlite3.Connection, location_query: Optio
         ).fetchall()
         recent_road_list = [dict(r) for r in recent_road_rows]
 
-        hotspots = [
-            {"zone": "Sarjapur Road Corridor", "issue": "Potholes due to BWSSB pipeline excavation", "status": "BBMP patching scheduled"},
-            {"zone": "Bannerghatta Road (near Arekere)", "issue": "Uneven road surface from Metro pier works", "status": "Temporary asphalt laid"},
-            {"zone": "Varthur Gunjur Main Road", "issue": "Damaged shoulder and pothole cluster", "status": "Under review by Mahadevapura zone"},
-        ]
-
         summary = (
             f"Road damage redressal active: {road_complaints_count} pothole and road grievances recorded in Civic Eye "
             f"({resolved_count} repaired/resolved). Photo upload and citizen tracking enabled."
@@ -1411,7 +1414,7 @@ def get_road_damage_status(connection: sqlite3.Connection, location_query: Optio
             "location": f"{loc['name']}, {loc['state']}",
             "coordinates": {"latitude": loc["latitude"], "longitude": loc["longitude"]},
             "status": "live",
-            "source": "Civic Pulse Civic Eye & BBMP Road Infrastructure",
+            "source": "Civic Pulse Civic Eye",
             "source_url": "https://ipgrs.karnataka.gov.in/",
             "last_updated": now_str,
             "data": {
@@ -1419,7 +1422,7 @@ def get_road_damage_status(connection: sqlite3.Connection, location_query: Optio
                 "repaired_resolved_count": resolved_count,
                 "pending_count": road_complaints_count - resolved_count,
                 "recent_road_reports": recent_road_list,
-                "known_hotspots": hotspots,
+                "known_hotspots": [],
                 "reporting_module": "/civic-eye",
                 "bbmp_fixmystreet_url": "https://bbmp.gov.in/",
                 "support_features": [
@@ -1528,7 +1531,7 @@ def get_tourist_attractions_status(location_query: Optional[str] = None, refresh
         "location": f"{loc['name']}, {loc['state']}",
         "coordinates": {"latitude": loc["latitude"], "longitude": loc["longitude"]},
         "status": "directory",
-        "source": "Karnataka Tourism & ASI Bengaluru Circle",
+        "source": "Karnataka Tourism and ASI official portals",
         "source_url": "https://karnatakatourism.org/",
         "last_updated": now_str,
         "data": {
@@ -1538,7 +1541,7 @@ def get_tourist_attractions_status(location_query: Optional[str] = None, refresh
             "official_portal": "https://karnatakatourism.org/en/destinations/",
             "ticketing_guidance": "Tickets for ASI monuments can be booked online via https://asi.nic.in/ or at entry counters.",
         },
-        "summary": "Directory of 6 verified landmark attractions in Bengaluru (Lalbagh, Cubbon Park, Bangalore Palace, Bannerghatta Zoo, Vidhana Soudha, Tipu Summer Palace).",
+        "summary": "Directory of 6 listed Bengaluru attractions with official information links.",
         "message": None,
     }
 

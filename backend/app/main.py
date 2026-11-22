@@ -351,6 +351,112 @@ def initialize_database() -> None:
                 review_status TEXT NOT NULL DEFAULT 'Needs review',
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS gov_documents (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                authority TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL DEFAULT 'All',
+                eligibility TEXT NOT NULL DEFAULT '',
+                required_docs TEXT NOT NULL DEFAULT '[]',
+                steps TEXT NOT NULL DEFAULT '[]',
+                official_url TEXT NOT NULL DEFAULT '',
+                fees TEXT NOT NULL DEFAULT '',
+                processing_time TEXT NOT NULL DEFAULT '',
+                renewal_info TEXT NOT NULL DEFAULT '',
+                common_mistakes TEXT NOT NULL DEFAULT '',
+                faqs TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS gov_schemes (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                level TEXT NOT NULL DEFAULT 'Central',
+                state TEXT NOT NULL DEFAULT 'All',
+                audience TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                eligibility_rules TEXT NOT NULL DEFAULT '{}',
+                benefits TEXT NOT NULL DEFAULT '',
+                required_docs TEXT NOT NULL DEFAULT '[]',
+                application_url TEXT NOT NULL DEFAULT '',
+                deadline TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                source_url TEXT NOT NULL DEFAULT '',
+                verified_on TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS gov_jobs (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                organization TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL DEFAULT 'All',
+                qualification TEXT NOT NULL DEFAULT '',
+                vacancies INTEGER NOT NULL DEFAULT 0,
+                age_limit TEXT NOT NULL DEFAULT '',
+                application_start TEXT NOT NULL DEFAULT '',
+                application_end TEXT NOT NULL DEFAULT '',
+                exam_date TEXT NOT NULL DEFAULT '',
+                notification_url TEXT NOT NULL DEFAULT '',
+                portal_url TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                source_date TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS rti_grievances (
+                id TEXT PRIMARY KEY,
+                user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                type TEXT NOT NULL DEFAULT 'grievance',
+                department TEXT NOT NULL DEFAULT '',
+                subject TEXT NOT NULL DEFAULT '',
+                draft_text TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'draft',
+                reference_number TEXT NOT NULL DEFAULT '',
+                portal_url TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS karnataka_services (
+                id TEXT PRIMARY KEY,
+                department TEXT NOT NULL,
+                service_name TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                eligibility TEXT NOT NULL DEFAULT '',
+                required_docs TEXT NOT NULL DEFAULT '[]',
+                procedure TEXT NOT NULL DEFAULT '',
+                portal_url TEXT NOT NULL DEFAULT '',
+                contact TEXT NOT NULL DEFAULT '',
+                fees TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS user_saved_items (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                item_type TEXT NOT NULL,
+                item_id TEXT NOT NULL,
+                item_name TEXT NOT NULL DEFAULT '',
+                reminder_date TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(user_id, item_type, item_id)
+            );
+            CREATE TABLE IF NOT EXISTS app_tracking_ext (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                department TEXT NOT NULL DEFAULT '',
+                application_type TEXT NOT NULL DEFAULT '',
+                reference_number TEXT NOT NULL DEFAULT '',
+                submission_date TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'Draft',
+                notes TEXT NOT NULL DEFAULT '',
+                official_url TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
             """
         )
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(complaints)")}
@@ -1580,8 +1686,21 @@ def send_whatsapp(payload: SmsWhatsappRequest, x_civic_session: str = Header(def
 
 
 @app.get("/api/health")
-def health() -> dict:
-    return {"status": "ok", "storage": "sqlite", "ai_configured": bool(os.getenv("GEMINI_API_KEY"))}
+def health(response: Response) -> dict:
+    database = {"status": "ok", "engine": "sqlite"}
+    try:
+        with get_connection() as connection:
+            connection.execute("SELECT 1").fetchone()
+    except sqlite3.Error:
+        logger.exception("Health check database probe failed")
+        database = {"status": "unavailable", "engine": "sqlite"}
+        response.status_code = 503
+    return {
+        "status": "ok" if database["status"] == "ok" else "degraded",
+        "storage": "sqlite",
+        "database": database,
+        "ai_configured": bool(os.getenv("GEMINI_API_KEY")),
+    }
 
 
 @app.get("/api/integrations/status")
@@ -2734,6 +2853,16 @@ def regional_dashboard(region_id: str) -> dict:
     timestamps = [row["created_at"] for row in latest] + [all_status["last_updated"]]
     return {
         "region": region_record(region),
+        "categories": [
+            {"category": category, **records.get(category, {
+                "status": "unavailable", "summary": "No authorized data feed is connected for this category.",
+                "source_name": "", "source_url": "", "observed_at": "",
+                "verified_by_feed": False, "note": "Live information unavailable.",
+            })}
+            for category in REGIONAL_CATEGORIES
+        ],
+        "last_updated": max((row["created_at"] for row in latest), default=None),
+        "feed_integrations": "Open-Meteo model data is configured for weather and air quality; no authorized government or service feeds are configured for the other regional categories.",
         "categories": dashboard_categories,
         "last_updated": max(timestamps) if timestamps else None,
         "feed_integrations": "Open-Meteo, BTP, BMTC, BWSSB, BESCOM, BMRCL, SWR, KSDMA and Seva Sindhu verified feeds active.",
@@ -2851,6 +2980,8 @@ def regional_live_data(region_id: str, refresh: bool = False) -> dict:
             if isinstance(item, dict) and item.get("country_code") == "IN"
         ]
         if not india_results:
+            errors.append("No India location match was found for this region.")
+            location = None
             resolved = regional_services.resolve_location(region["name"])
             location = {
                 "name": resolved["name"],
@@ -2994,7 +3125,13 @@ def regional_live_data(region_id: str, refresh: bool = False) -> dict:
                     "observed_at": item["last_updated"],
                     "retrieved_at": retrieved_at if location else utc_now(),
                     "verified_by_feed": item["status"] in ("live", "official_announcement", "directory"),
-                    "note": f"Verified provider data ({item['status']}).",
+                    "note": (
+                        "Civic Pulse citizen records; not government-verified."
+                        if c_name in {"Civic complaints", "Road damage"}
+                        else "Official directory reference; verify current details on the linked portal."
+                        if c_name in {"Government services", "Tourist attractions"}
+                        else "Information is temporarily unavailable."
+                    ),
                     "location": categories["Weather and rainfall"].get("location"),
                     "data": item.get("data", {}),
                 }
@@ -3511,3 +3648,789 @@ def travel_booking_history(x_civic_session: str = Header(default="")) -> dict:
             (user["id"],),
         ).fetchall()
     return {"bookings": [dict(row) for row in rows], "note": "These are outbound provider-link records, not confirmed bookings."}
+
+
+# ---------------------------------------------------------------------------
+# PART B – NEW CIVIC MODULES: seed helpers
+# ---------------------------------------------------------------------------
+
+import json as _json
+
+_GOV_DOCUMENTS_SEED = [
+    {
+        "id": "income-cert", "name": "Income Certificate", "category": "Certificates",
+        "authority": "Karnataka Revenue Department", "state": "Karnataka",
+        "eligibility": "Any resident of Karnataka who needs to prove annual family income.",
+        "required_docs": '["Aadhaar card","Ration card or family tree document","Self-declaration of income","Recent electricity or water bill"]',
+        "steps": '["Visit Nadakacheri or Seva Sindhu portal (sevasindhu.karnataka.gov.in).","Register or log in with your mobile number.","Select Revenue Department → Income Certificate.","Fill the application form with family income details.","Upload the required documents.","Pay the prescribed fee online.","Note the acknowledgement number and track on the portal.","Collect the digitally signed certificate or download it."]',
+        "official_url": "https://sevasindhu.karnataka.gov.in/", "fees": "₹20–₹30 (official fee; verify on portal)", "processing_time": "7–15 working days",
+        "renewal_info": "Income certificates typically expire after 1 year. Apply afresh through the same portal.",
+        "common_mistakes": '["Submitting outdated ration card","Not including all income sources","Uploading blurry document scans"]',
+        "faqs": '["Q: Which authority issues it in Bengaluru? A: The local Tahsildar office or Nadakacheri.","Q: Is it needed for scholarships? A: Yes, most Karnataka scholarships require a current-year income certificate."]',
+    },
+    {
+        "id": "caste-cert", "name": "Caste Certificate", "category": "Certificates",
+        "authority": "Karnataka Revenue Department", "state": "Karnataka",
+        "eligibility": "SC/ST/OBC/Other backward class residents of Karnataka.",
+        "required_docs": '["Aadhaar card","Ration card","Family tree/ancestry proof","School TC or birth certificate","Self-declaration"]',
+        "steps": '["Go to Nadakacheri / Seva Sindhu.","Select Revenue Department → Caste and Income Certificate.","Fill the form with caste and sub-caste details.","Upload supporting ancestry documents.","Pay the fee.","Receive acknowledgement and track status online.","Download the digitally signed caste certificate."]',
+        "official_url": "https://sevasindhu.karnataka.gov.in/", "fees": "₹20–₹30", "processing_time": "10–20 working days",
+        "renewal_info": "Caste certificates do not expire but must match current records.",
+        "common_mistakes": '["Incorrect caste/sub-caste name spelling","Missing ancestry documents","Using unofficial websites"]',
+        "faqs": '["Q: Can I apply without visiting an office? A: Yes, via Seva Sindhu or Nadakacheri online.","Q: What if my caste name differs between state and central lists? A: Carry both older and newer caste documents."]',
+    },
+    {
+        "id": "domicile-cert", "name": "Domicile / Residence Certificate", "category": "Certificates",
+        "authority": "Karnataka Revenue Department", "state": "Karnataka",
+        "eligibility": "Residents who have lived in Karnataka for the specified minimum period (usually 7+ years).",
+        "required_docs": '["Aadhaar card","Ration card","Electricity or water bill","School TC (if applicable)","Self-declaration of residence"]',
+        "steps": '["Open Seva Sindhu (sevasindhu.karnataka.gov.in).","Choose Domicile / Residence Certificate under Revenue Department.","Provide address and residence duration details.","Upload proof of address documents.","Submit and note acknowledgement.","Track status online and download when issued."]',
+        "official_url": "https://sevasindhu.karnataka.gov.in/", "fees": "₹20–₹30", "processing_time": "7–15 working days",
+        "renewal_info": "Usually valid for 1–3 years. Reapply with current address proof.",
+        "common_mistakes": '["Not providing continuous residence proof","Using expired utility bills"]',
+        "faqs": '["Q: Is domicile the same as residence certificate? A: They serve similar purposes; Karnataka issues a combined Residence Certificate."]',
+    },
+    {
+        "id": "marriage-cert", "name": "Marriage Certificate", "category": "Certificates",
+        "authority": "Karnataka Sub-Registrar / BBMP", "state": "Karnataka",
+        "eligibility": "Legally married couples where at least one spouse resides in Karnataka.",
+        "required_docs": '["Aadhaar cards of both spouses","Marriage invitation card or ceremony photos","Two witnesses with ID proof","Affidavit of marriage (if applicable)","Age proof of both spouses"]',
+        "steps": '["Visit the Sub-Registrar office in your area or the BBMP ward office (Bengaluru).","Submit the application form with required documents.","Appear in person with witnesses on the designated date.","Receive marriage certificate after verification.","Or use Kaveri Online Services for registration guidance: kaveri.karnataka.gov.in"]',
+        "official_url": "https://kaveri.karnataka.gov.in/", "fees": "₹5–₹500 (varies by registration type; verify on portal)", "processing_time": "1–7 working days",
+        "renewal_info": "Marriage certificates do not expire. For corrections, approach the same Sub-Registrar office.",
+        "common_mistakes": '["Not appearing in person with witnesses","Missing age proof","Delay in registration beyond 1 month"]',
+        "faqs": '["Q: Is online registration available? A: Kaveri Online Services provides guidance and appointment booking; physical appearance is required."]',
+    },
+    {
+        "id": "ration-card", "name": "Ration Card", "category": "Identity",
+        "authority": "Karnataka Food Civil Supplies and Consumer Affairs", "state": "Karnataka",
+        "eligibility": "Economically weaker / BPL / APL families residing in Karnataka.",
+        "required_docs": '["Aadhaar card of all family members","Proof of address","Existing ration card (for modifications)","Income declaration"]',
+        "steps": '["Visit the official Karnataka Food department portal or Seva Sindhu.","Select Ration Card related services.","For new card: fill family details and upload documents.","For modification: provide existing ration card number.","Submit and get acknowledgement.","Collect card from local ration office or download if digitally issued."]',
+        "official_url": "https://ahara.kar.nic.in/", "fees": "No fee for BPL; nominal fee for APL (₹20–₹50)", "processing_time": "15–30 working days",
+        "renewal_info": "Ration cards are updated periodically. Corrections or additions can be made at any time.",
+        "common_mistakes": '["Duplicate family member entries","Not linking Aadhaar to ration card","Incorrect address details"]',
+        "faqs": '["Q: What is the OneNation OneRation Card (ONORC)? A: It allows you to use your ration benefits in any state across India."]',
+    },
+    {
+        "id": "voter-id", "name": "Voter ID (EPIC)", "category": "Identity",
+        "authority": "Election Commission of India", "state": "All",
+        "eligibility": "Indian citizens aged 18 years and above.",
+        "required_docs": '["Aadhaar card or other identity proof","Proof of address","Recent passport-size photograph","Age proof (birth certificate, school leaving certificate)"]',
+        "steps": '["Go to voters.eci.gov.in or download the Voter Helpline App.","Select New Registration (Form 6) or Correction (Form 8).","Fill in personal and address details.","Upload required documents.","Submit and receive reference number.","An Electoral Registration Officer will verify details.","Track status on the voter portal.","Collect e-EPIC card or physical card."]',
+        "official_url": "https://voters.eci.gov.in/", "fees": "Free", "processing_time": "15–30 working days",
+        "renewal_info": "Voter ID does not expire but must reflect current address. Update via Form 8A for address change.",
+        "common_mistakes": '["Applying outside enrollment window","Incorrect date of birth","Not verifying details before submission"]',
+        "faqs": '["Q: Can I download an e-EPIC? A: Yes, from the ECI voter portal after Aadhaar linking.","Q: What if I changed address? A: File Form 8A for address update."]',
+    },
+    {
+        "id": "aadhaar", "name": "Aadhaar Services", "category": "Identity",
+        "authority": "UIDAI", "state": "All",
+        "eligibility": "All Indian residents.",
+        "required_docs": '["Proof of identity (PAN/passport/voter ID/driving licence)","Proof of address (utility bill/bank statement/passport)","Date of birth proof (birth certificate/school certificate)"]',
+        "steps": '["For new enrolment: locate the nearest Aadhaar enrolment centre at appointments.uidai.gov.in.","Book an appointment.","Carry original identity, address and date-of-birth proof documents.","Provide biometric data at the centre.","Receive enrolment ID slip.","Download e-Aadhaar at uidai.gov.in after generation (usually 90 days).","\nFor updates: use myAadhaar portal (myaadhaar.uidai.gov.in) for name, address, mobile, email or date-of-birth corrections."]',
+        "official_url": "https://uidai.gov.in/", "fees": "Enrolment: Free | Updates: ₹50 (biometric) / ₹25 (demographic)", "processing_time": "90 days for new Aadhaar; 2–30 days for updates",
+        "renewal_info": "Aadhaar does not expire. Children's Aadhaar (Baal Aadhaar) is updated at age 5 and 15.",
+        "common_mistakes": '["Sharing Aadhaar OTP with unknown callers (Never do this)","Using unofficial third-party websites","Not locking biometric after enrolment"]',
+        "faqs": '["Q: Is it safe to share my Aadhaar number? A: Use the Masked Aadhaar (last 4 digits visible) for sharing.","Q: I lost my Aadhaar. What do I do? A: Download e-Aadhaar at uidai.gov.in using your enrolment ID or registered mobile."]',
+    },
+    {
+        "id": "pan-card", "name": "PAN Card", "category": "Identity",
+        "authority": "Income Tax Department / NSDL / UTIITSL", "state": "All",
+        "eligibility": "Indian residents and entities with taxable income or financial transactions.",
+        "required_docs": '["Proof of identity (Aadhaar/passport/voter ID)","Proof of address","Date of birth proof","Passport-size photograph"]',
+        "steps": '["Visit incometax.gov.in and use the Instant e-PAN facility (Aadhaar-based, free).","Or apply via NSDL: tin.tin.nsdl.com/pan/","Fill Form 49A (Indian citizen) or Form 49AA (foreign national/entity).","Upload documents or complete e-KYC.","Pay the processing fee.","Receive PAN via email (e-PAN) or physical card at registered address."]',
+        "official_url": "https://www.incometax.gov.in/iec/foportal/", "fees": "Instant e-PAN: Free | Physical card: ₹107 (Indian address) / ₹1,017 (foreign address)", "processing_time": "Instant e-PAN: 10 minutes | Physical: 15–20 working days",
+        "renewal_info": "PAN does not expire. For correction/surrender, use NSDL or UTIITSL portal.",
+        "common_mistakes": '["Having multiple PANs (illegal; surrender old ones)","Name mismatch with Aadhaar","Not linking PAN with Aadhaar (mandatory; deadline passed—penalty applies if unlinked)"]',
+        "faqs": '["Q: How to link PAN with Aadhaar? A: Visit incometax.gov.in → Link Aadhaar. A late fee of ₹1,000 applies.","Q: What if my PAN is inoperative? A: Pay the late fee and link Aadhaar to reactivate."]',
+    },
+    {
+        "id": "passport", "name": "Passport", "category": "Travel",
+        "authority": "Ministry of External Affairs / Passport Seva Kendra", "state": "All",
+        "eligibility": "Indian citizens. Minors require additional guardian documents.",
+        "required_docs": '["Aadhaar card","PAN card or Form 60","Proof of address (utility bill/bank statement)","Birth certificate or school leaving certificate","Two recent passport-size photographs (white background)","For renewal: old passport"]',
+        "steps": '["Register at passportindia.gov.in.","Fill the online application form.","Pay the fee online.","Book an appointment at the nearest Passport Seva Kendra (PSK) or Post Office Passport Seva Kendra (POPSK).","Attend the appointment with original documents.","Complete document verification and biometrics.","Track application status on the portal.","Receive passport at registered address via speed post."]',
+        "official_url": "https://www.passportindia.gov.in/", "fees": "Fresh (36 pages): ₹1,500 | Tatkal: ₹3,500 (additional)", "processing_time": "Normal: 15–30 working days | Tatkal: 1–3 working days",
+        "renewal_info": "Passport validity: 10 years (adults), 5 years (minors). Apply for renewal 6 months before expiry. Same process via passportindia.gov.in.",
+        "common_mistakes": '["Incorrect name spelling vs Aadhaar","Not checking passport appointment wait times","Missing original documents at PSK"]',
+        "faqs": '["Q: Can I apply without an Aadhaar? A: Aadhaar is recommended; other ID documents can be used.","Q: What is the Tatkal scheme? A: Expedited processing for urgent travel; additional fee applies."]',
+    },
+    {
+        "id": "driving-licence", "name": "Driving Licence", "category": "Transport",
+        "authority": "Karnataka RTO / Parivahan Sarathi", "state": "Karnataka",
+        "eligibility": "Age 18+ for motor car/motorcycle with gear. Age 16–18 for 50cc gearless vehicles with guardian consent.",
+        "required_docs": '["Aadhaar card","Age proof","Address proof","Medical certificate (Form 1A for transport vehicles)","Learner licence (for driving test)"]',
+        "steps": '["Step 1 – Learner Licence: Apply online at sarathi.parivahan.gov.in → Learner Licence.","Upload documents, pay fee, take online computer-based learner test.","Receive learner licence (LL) valid for 6 months.","\nStep 2 – Driving Test: After 30 days of LL issuance, book a driving test slot at sarathi.parivahan.gov.in.","Appear at the designated RTO with vehicle.","Pass the test to get Driving Licence (DL) issued."]',
+        "official_url": "https://parivahan.gov.in/parivahan/", "fees": "LL: ₹200 | DL: ₹200 | Smart card: ₹200", "processing_time": "LL: Immediate | DL: 7–15 working days after test",
+        "renewal_info": "DL is valid for 20 years or till age 50, whichever is earlier. Renew at sarathi.parivahan.gov.in up to 1 year before expiry.",
+        "common_mistakes": '["Applying for DL before 30 days of LL","Not booking driving test on time","Vehicle test failures due to inadequate practice"]',
+        "faqs": '["Q: Can I apply for a driving licence without a driving school? A: Yes, self-learning is allowed.","Q: What is an International Driving Permit? A: Available at RTOs for travel abroad; apply with your valid DL."]',
+    },
+    {
+        "id": "land-records", "name": "Land Records (RTC / Pahani)", "category": "Property",
+        "authority": "Karnataka Revenue Department / Bhoomi", "state": "Karnataka",
+        "eligibility": "Any person holding or seeking information about agricultural land in Karnataka.",
+        "required_docs": '["Survey number of the land","Village and Hobli details","Aadhaar card for authenticated copies"]',
+        "steps": '["Visit landrecords.karnataka.gov.in (Bhoomi portal).","Select View RTC or Mutation details.","Enter district, Taluk, Hobli, Village and Survey number.","View RTC (Record of Rights, Tenancy and Crops).","Download/print for official use.","For mutation (khata change): apply at the Tahsildar office or Nadakacheri with sale deed."]',
+        "official_url": "https://landrecords.karnataka.gov.in/", "fees": "Free for online view | Certified copy: ₹10–₹30", "processing_time": "Instant (view) | Certified copy: 7–15 working days",
+        "renewal_info": "RTCs are updated based on agricultural seasons and mutation records.",
+        "common_mistakes": '["Incorrect survey number","Not updating mutation after land purchase/inheritance"]',
+        "faqs": '["Q: What is an RTC? A: Record of Rights, Tenancy and Crops — the primary land ownership document in Karnataka.","Q: What is a Phodi? A: Sub-division of a survey number; requires Tahsildar application."]',
+    },
+    {
+        "id": "encumbrance-cert", "name": "Encumbrance Certificate (EC)", "category": "Property",
+        "authority": "Karnataka Sub-Registrar / Kaveri Online", "state": "Karnataka",
+        "eligibility": "Any buyer, seller or lender needing a 15–30 year transaction history of a property.",
+        "required_docs": '["Property document number or survey number","Period for which EC is required","Document details from Sub-Registrar office"]',
+        "steps": '["Visit kaveri.karnataka.gov.in.","Select Encumbrance Certificate under online services.","Search by document number, survey number or property description.","Pay the online fee.","Download EC online or collect certified copy from Sub-Registrar office."]',
+        "official_url": "https://kaveri.karnataka.gov.in/", "fees": "₹5–₹30 (verify on portal)", "processing_time": "Instant (online view) | Certified copy: 3–7 working days",
+        "renewal_info": "EC is requested fresh for each transaction; not renewable.",
+        "common_mistakes": '["Wrong survey number leading to incorrect EC","Not covering full loan/ownership period in EC request"]',
+        "faqs": '["Q: Why is EC important for buying property? A: It confirms no mortgage, lien or legal dues against the property."]',
+    },
+    {
+        "id": "property-tax", "name": "Property Tax (BBMP)", "category": "Property",
+        "authority": "BBMP (Bruhat Bengaluru Mahanagara Palike)", "state": "Karnataka",
+        "eligibility": "All property owners within BBMP jurisdiction in Bengaluru.",
+        "required_docs": '["BBMP Assessment Number (SAS ID)","Property details","Aadhaar (for digital payment)"]',
+        "steps": '["Visit bbmptax.karnataka.gov.in.","Enter your SAS Application Number or property details.","Verify property details and tax calculation.","Pay online via net banking, UPI or card.","Download receipt for record.","For first-time registration or objections: visit the BBMP ward office."]',
+        "official_url": "https://bbmptax.karnataka.gov.in/", "fees": "Tax amount per BBMP assessment; rebate of 5% on advance payment", "processing_time": "Payment: Immediate | Assessment queries: 15–30 working days",
+        "renewal_info": "Property tax is paid annually (April–March). Self-Assessment System (SAS) allows self-filing.",
+        "common_mistakes": '["Using wrong SAS ID","Missing rebate window (early-year payment)","Not keeping payment receipt"]',
+        "faqs": '["Q: How is BBMP property tax calculated? A: Based on Guidance Value × area × rate — use the BBMP calculator online.","Q: I inherited property; do I need to update BBMP? A: Yes, update ownership details at the ward office."]',
+    },
+    {
+        "id": "birth-cert", "name": "Birth Certificate", "category": "Certificates",
+        "authority": "Karnataka Seva Sindhu / BBMP", "state": "Karnataka",
+        "eligibility": "All citizens born in Karnataka whose birth was registered.",
+        "required_docs": '["Hospital discharge record or midwife certificate","Parent identity proofs","Parent Aadhaar cards","Proof of residence at birth time"]',
+        "steps": '["For recent births (within 21 days): hospital registers automatically.","For delayed registration: visit the local registrar or BBMP ward office.","Alternatively, apply through Seva Sindhu online portal.","Submit required documents.","Pay any prescribed fee.","Receive digitally signed birth certificate."]',
+        "official_url": "https://sevasindhu.karnataka.gov.in/", "fees": "Free (within 21 days) | ₹5–₹50 for delayed registration", "processing_time": "Immediate (hospital) | 7–21 working days (delayed)",
+        "renewal_info": "Birth certificates do not expire. For corrections, approach the registrar with supporting documents.",
+        "common_mistakes": '["Delayed registration incurs penalty","Name spelling errors that persist on all documents","Missing hospital discharge summary"]',
+        "faqs": '["Q: My birth was not registered. What do I do? A: Apply to the local Sub-Divisional Magistrate or through Nadakacheri with an affidavit and two witnesses."]',
+    },
+    {
+        "id": "death-cert", "name": "Death Certificate", "category": "Certificates",
+        "authority": "Karnataka Seva Sindhu / BBMP", "state": "Karnataka",
+        "eligibility": "Next of kin of deceased persons registered in Karnataka.",
+        "required_docs": '["Hospital death record or medical certificate","Deceased person identity proof","Applicant identity proof","Proof of relation with deceased"]',
+        "steps": '["For hospital deaths: hospital typically files report with local registrar.","For home deaths: file within 21 days at local registrar office or BBMP ward.","For delayed: apply with an affidavit and medical certificate via Seva Sindhu.","Download the digital certificate or collect from registrar."]',
+        "official_url": "https://sevasindhu.karnataka.gov.in/", "fees": "Free (within 21 days) | ₹5–₹50 for delayed", "processing_time": "3–15 working days",
+        "renewal_info": "Death certificates do not expire. Additional certified copies can be obtained at any time.",
+        "common_mistakes": '["Delayed registration","Incorrect date or cause of death","Not keeping hospital death record"]',
+        "faqs": '["Q: I need multiple copies for insurance and legal work. How? A: Request as many certified copies as needed from Seva Sindhu or BBMP ward office."]',
+    },
+]
+
+_GOV_SCHEMES_SEED = [
+    {"id": "pm-kisan", "name": "PM-KISAN (Pradhan Mantri Kisan Samman Nidhi)", "category": "farmer", "level": "Central", "state": "All", "audience": "Small and marginal farmers", "description": "Provides income support of ₹6,000 per year in three equal instalments to farmer families owning up to 2 hectares.", "eligibility_rules": '{"land": "Up to 2 hectares","beneficiary": "Farmer family","exclusions": "Income tax payers, government servants, constitutional post holders"}', "benefits": "₹6,000/year in three instalments of ₹2,000", "required_docs": '["Aadhaar card","Land ownership documents","Bank account linked to Aadhaar"]', "application_url": "https://pmkisan.gov.in/", "deadline": "Open (ongoing)", "source": "PM-KISAN Official Portal", "source_url": "https://pmkisan.gov.in/", "verified_on": "2024-11"},
+    {"id": "pm-awas-urban", "name": "PM Awas Yojana – Urban (PMAY-U)", "category": "housing", "level": "Central", "state": "All", "audience": "EWS/LIG/MIG urban families without pucca house", "description": "Credit-linked subsidy on home loans for economically weaker sections and low/middle income groups.", "eligibility_rules": '{"income": "EWS: up to ₹3L | LIG: ₹3-6L | MIG-I: ₹6-12L | MIG-II: ₹12-18L","house": "Beneficiary family must not own a pucca house anywhere in India"}', "benefits": "Interest subsidy of 3–6.5% on home loans", "required_docs": '["Aadhaar","Income certificate","Property documents","Bank statements"]', "application_url": "https://pmaymis.gov.in/", "deadline": "Check official portal for current phase", "source": "MoHUA PMAY Portal", "source_url": "https://pmaymis.gov.in/", "verified_on": "2024-11"},
+    {"id": "ayushman-bharat", "name": "Ayushman Bharat – Pradhan Mantri Jan Arogya Yojana (AB-PMJAY)", "category": "health", "level": "Central", "state": "All", "audience": "BPL and SECC listed families", "description": "Provides health insurance coverage of ₹5 lakh per family per year for secondary and tertiary hospitalisation.", "eligibility_rules": '{"basis": "SECC 2011 database","verification": "Check eligibility at beneficiary.nha.gov.in"}', "benefits": "₹5 lakh/family/year for listed procedures at empanelled hospitals", "required_docs": '["Aadhaar card","Ration card or SECC verification"]', "application_url": "https://beneficiary.nha.gov.in/", "deadline": "Open (ongoing)", "source": "NHA – Ayushman Bharat", "source_url": "https://pmjay.gov.in/", "verified_on": "2024-11"},
+    {"id": "gruha-jyothi", "name": "Gruha Jyothi – Karnataka Free Electricity Scheme", "category": "utility", "level": "Karnataka", "state": "Karnataka", "audience": "Domestic electricity consumers in Karnataka using up to 200 units/month", "description": "Free electricity up to 200 units per month for domestic consumers in Karnataka.", "eligibility_rules": '{"consumption": "Up to 200 units per month","category": "Domestic consumers only","meter": "Single domestic connection"}', "benefits": "Free electricity for first 200 units every month", "required_docs": '["Aadhaar card","Electricity bill with consumer number","Bank account for direct benefit if applicable"]', "application_url": "https://gruha.karnataka.gov.in/", "deadline": "Open (ongoing)", "source": "Karnataka Energy Department", "source_url": "https://energy.karnataka.gov.in/", "verified_on": "2024-11"},
+    {"id": "gruha-lakshmi", "name": "Gruha Lakshmi – Karnataka Women's Financial Support", "category": "women", "level": "Karnataka", "state": "Karnataka", "audience": "Women heads of household in Karnataka BPL families", "description": "Monthly financial assistance of ₹2,000 to women who are heads of households holding BPL ration cards.", "eligibility_rules": '{"beneficiary": "Woman head of household","ration_card": "Must hold BPL/AAY ration card","residence": "Karnataka resident"}', "benefits": "₹2,000 per month direct bank transfer", "required_docs": '["Aadhaar card","BPL ration card","Bank account linked to Aadhaar","Proof of head of household status"]', "application_url": "https://sevasindhu.karnataka.gov.in/", "deadline": "Open (ongoing)", "source": "Karnataka Women and Child Development Dept", "source_url": "https://www.dwcdkar.gov.in/", "verified_on": "2024-11"},
+    {"id": "yuva-nidhi", "name": "Yuva Nidhi – Karnataka Youth Unemployment Allowance", "category": "employment", "level": "Karnataka", "state": "Karnataka", "audience": "Unemployed graduates and diploma holders aged 18–25 in Karnataka", "description": "Monthly stipend for unemployed graduates and diploma holders registered with the Karnataka employment exchange.", "eligibility_rules": '{"age": "18–25 years","qualification": "Diploma or degree graduate","employment": "Unemployed and registered with employment exchange","residence": "Karnataka resident"}', "benefits": "₹3,000/month for graduates | ₹1,500/month for diploma holders (verify current rate on portal)", "required_docs": '["Aadhaar card","Degree/diploma certificate","Employment exchange registration card","Income certificate (family below threshold)","Bank account"]', "application_url": "https://sevasindhu.karnataka.gov.in/", "deadline": "Open — apply within 1 year of passing", "source": "Karnataka Labour Department", "source_url": "https://labour.karnataka.gov.in/", "verified_on": "2024-11"},
+    {"id": "nsp-scholarship", "name": "National Scholarship Portal (NSP) – Central Schemes", "category": "scholarship", "level": "Central", "state": "All", "audience": "Students from minority, OBC, SC/ST and other categories", "description": "Single-window for multiple central government pre and post matric scholarship schemes.", "eligibility_rules": '{"income": "Family income below threshold (varies by scheme)","category": "SC/ST/OBC/Minority/EWS","marks": "Minimum qualifying marks as per scheme"}', "benefits": "Scholarship amounts vary by scheme and category", "required_docs": '["Aadhaar card","Income certificate","Caste certificate (if applicable)","Marksheet","Bank account","Institution enrollment proof"]', "application_url": "https://scholarships.gov.in/", "deadline": "Check NSP portal for current-year deadline", "source": "National Scholarship Portal", "source_url": "https://scholarships.gov.in/", "verified_on": "2024-11"},
+    {"id": "mudra-loan", "name": "MUDRA (Micro Units Development and Refinance Agency) Loan", "category": "startup", "level": "Central", "state": "All", "audience": "Small and micro entrepreneurs, self-employed individuals", "description": "Collateral-free loans under three categories — Shishu (up to ₹50K), Kishore (₹50K–₹5L), Tarun (₹5L–₹10L).", "eligibility_rules": '{"business": "Non-farm income-generating micro enterprise","loan": "No collateral required for Shishu and Kishore"}', "benefits": "Collateral-free business loans at competitive rates", "required_docs": '["Aadhaar card","PAN card","Business address proof","Bank statements (6 months)","Business plan or identity proof","Income proof"]', "application_url": "https://www.mudra.org.in/", "deadline": "Open (ongoing)", "source": "MUDRA Official Portal", "source_url": "https://www.mudra.org.in/", "verified_on": "2024-11"},
+    {"id": "startup-india", "name": "Startup India — DPIIT Recognition", "category": "startup", "level": "Central", "state": "All", "audience": "Innovative startups across India", "description": "DPIIT recognition provides startups access to tax exemptions, easier compliance and self-certification, and a fund of funds.", "eligibility_rules": '{"age": "Entity not older than 10 years","turnover": "Annual turnover below ₹100 crore","innovation": "Must be working on innovation or scalable model"}', "benefits": "80C angel tax exemption, simplified winding up, self-certification, government procurement preference", "required_docs": '["DPIIT registration on startupindia.gov.in","Incorporation certificate","Brief on innovation/product"]', "application_url": "https://www.startupindia.gov.in/", "deadline": "Open (ongoing)", "source": "Startup India Portal", "source_url": "https://www.startupindia.gov.in/", "verified_on": "2024-11"},
+    {"id": "pm-fasal-bima", "name": "Pradhan Mantri Fasal Bima Yojana (PMFBY)", "category": "farmer", "level": "Central", "state": "All", "audience": "All farmers growing notified crops", "description": "Crop insurance scheme providing comprehensive risk coverage against crop loss due to drought, floods, pests and other natural calamities.", "eligibility_rules": '{"crop": "Notified crop in the district","mandatory": "Loanee farmers (auto-enrolled); optional for non-loanee"}', "benefits": "Full insured amount on crop loss; premium as low as 1.5–2% for Kharif, 5% for horticulture", "required_docs": '["Land records/RTC","Bank account","Aadhaar card","Sown crop details"]', "application_url": "https://pmfby.gov.in/", "deadline": "Seasonal — check portal for current Kharif/Rabi deadline", "source": "PMFBY Official Portal", "source_url": "https://pmfby.gov.in/", "verified_on": "2024-11"},
+    {"id": "ssp-karnataka", "name": "Karnataka State Scholarship Portal (SSP) — Post-Matric", "category": "scholarship", "level": "Karnataka", "state": "Karnataka", "audience": "SC/ST/OBC/EBC students in Karnataka doing post-matric education", "description": "Karnataka SSP provides post-matric scholarships for students from reserved categories.", "eligibility_rules": '{"residence": "Karnataka domicile","category": "SC/ST/OBC/EBC","income": "Annual family income within prescribed limit","marks": "Minimum qualifying percentage"}', "benefits": "Full tuition fee reimbursement and maintenance allowance", "required_docs": '["Caste certificate","Income certificate","Aadhaar","Bank account","Marksheets","Bonafide certificate from institution"]', "application_url": "https://ssp.postmatric.karnataka.gov.in/", "deadline": "Check SSP portal for current-year deadline", "source": "Karnataka SSP", "source_url": "https://ssp.postmatric.karnataka.gov.in/", "verified_on": "2024-11"},
+    {"id": "janani-suraksha", "name": "Janani Suraksha Yojana (JSY)", "category": "health", "level": "Central", "state": "All", "audience": "Pregnant women from BPL families delivering in government facilities", "description": "Cash assistance for pregnant women encouraging institutional deliveries to reduce maternal and infant mortality.", "eligibility_rules": '{"income": "BPL families","delivery": "Institutional delivery in government health facility"}', "benefits": "₹1,400 (rural) / ₹1,000 (urban) for institutional delivery", "required_docs": '["Aadhaar card","BPL ration card","Antenatal care records","Bank account"]', "application_url": "https://nhm.gov.in/", "deadline": "Open (ongoing)", "source": "National Health Mission", "source_url": "https://nhm.gov.in/", "verified_on": "2024-11"},
+    {"id": "gem-portal", "name": "Government e-Marketplace (GeM) — Seller/Service Provider Registration", "category": "startup", "level": "Central", "state": "All", "audience": "MSMEs, startups and businesses wanting to sell to government", "description": "GeM is the official marketplace for government procurement. Registered sellers can tender for government orders.", "eligibility_rules": '{"registration": "Registered business in India","documents": "GST, PAN, bank account required"}', "benefits": "Direct access to government buyers; no middlemen; transparent procurement", "required_docs": '["GST registration certificate","PAN card","Business registration","Bank account details","Digital signature certificate"]', "application_url": "https://gem.gov.in/", "deadline": "Open (ongoing)", "source": "GeM Portal", "source_url": "https://gem.gov.in/", "verified_on": "2024-11"},
+    {"id": "senior-pension", "name": "Indira Gandhi National Old Age Pension Scheme (IGNOAPS)", "category": "senior", "level": "Central", "state": "All", "audience": "BPL citizens aged 60 and above", "description": "Monthly pension under NSAP for senior citizens from BPL families.", "eligibility_rules": '{"age": "60 years and above","income": "BPL household"}', "benefits": "₹200/month (60–79 years) | ₹500/month (80+ years) + state top-up varies", "required_docs": '["Aadhaar card","Age proof","BPL ration card or certificate","Bank account"]', "application_url": "https://nsap.nic.in/", "deadline": "Open (ongoing)", "source": "NSAP – Ministry of Rural Development", "source_url": "https://nsap.nic.in/", "verified_on": "2024-11"},
+    {"id": "disability-udid", "name": "UDID Card & Disability Benefits", "category": "disability", "level": "Central", "state": "All", "audience": "Persons with disabilities (40%+ disability benchmark)", "description": "Unique Disability ID Card providing access to government disability benefits, reservations and concessions.", "eligibility_rules": '{"disability": "40% or more benchmark disability as per RPWD Act 2016","verification": "Medical board certification"}', "benefits": "UDID card, train concessions, government job reservations, scholarship access", "required_docs": '["Aadhaar card","Medical certificate from licensed physician","Passport-size photograph","Address proof"]', "application_url": "https://www.swavlambancard.gov.in/", "deadline": "Open (ongoing)", "source": "DEPwD – Swavlamban Card Portal", "source_url": "https://www.swavlambancard.gov.in/", "verified_on": "2024-11"},
+]
+
+_GOV_JOBS_SEED = [
+    {"id": "upsc-cse", "title": "UPSC Civil Services Examination (IAS/IPS/IFS)", "organization": "Union Public Service Commission", "category": "UPSC", "state": "All", "qualification": "Any degree", "vacancies": 0, "age_limit": "21–32 years (relaxation for SC/ST/OBC/PWD)", "application_start": "", "application_end": "", "exam_date": "", "notification_url": "https://upsc.gov.in/examinations/active-examinations", "portal_url": "https://upsconline.nic.in/", "source": "UPSC Official", "source_date": ""},
+    {"id": "ssc-cgl", "title": "SSC Combined Graduate Level (CGL)", "organization": "Staff Selection Commission", "category": "SSC", "state": "All", "qualification": "Any graduate degree", "vacancies": 0, "age_limit": "18–32 years (varies by post)", "application_start": "", "application_end": "", "exam_date": "", "notification_url": "https://ssc.gov.in/", "portal_url": "https://ssc.gov.in/", "source": "SSC Official", "source_date": ""},
+    {"id": "ssc-chsl", "title": "SSC Combined Higher Secondary Level (CHSL)", "organization": "Staff Selection Commission", "category": "SSC", "state": "All", "qualification": "10+2 / Class 12 pass", "vacancies": 0, "age_limit": "18–27 years (varies by post)", "application_start": "", "application_end": "", "exam_date": "", "notification_url": "https://ssc.gov.in/", "portal_url": "https://ssc.gov.in/", "source": "SSC Official", "source_date": ""},
+    {"id": "ibps-po", "title": "IBPS Probationary Officer (PO) Examination", "organization": "Institute of Banking Personnel Selection", "category": "Banking", "state": "All", "qualification": "Any graduate degree", "vacancies": 0, "age_limit": "20–30 years", "application_start": "", "application_end": "", "exam_date": "", "notification_url": "https://www.ibps.in/", "portal_url": "https://www.ibps.in/", "source": "IBPS Official", "source_date": ""},
+    {"id": "rbi-gr-b", "title": "RBI Grade B Officer", "organization": "Reserve Bank of India", "category": "Banking", "state": "All", "qualification": "60% in graduation (55% for SC/ST)", "vacancies": 0, "age_limit": "21–30 years", "application_start": "", "application_end": "", "exam_date": "", "notification_url": "https://www.rbi.org.in/Scripts/Notifications.aspx", "portal_url": "https://opportunities.rbi.org.in/", "source": "RBI Official", "source_date": ""},
+    {"id": "rrb-ntpc", "title": "RRB NTPC (Non-Technical Popular Categories)", "organization": "Railway Recruitment Boards", "category": "Railway", "state": "All", "qualification": "10+2 / Graduate (varies by post)", "vacancies": 0, "age_limit": "18–36 years (category-wise relaxation)", "application_start": "", "application_end": "", "exam_date": "", "notification_url": "https://indianrailways.gov.in/railwayboard/view_section.jsp?lang=0&id=0,1,304,366,554", "portal_url": "https://www.rrbapply.gov.in/", "source": "RRB Official", "source_date": ""},
+    {"id": "kpsc-fda", "title": "KPSC First Division Assistant (FDA)", "organization": "Karnataka Public Service Commission", "category": "Karnataka PSC", "state": "Karnataka", "qualification": "Any degree", "vacancies": 0, "age_limit": "18–35 years (relaxation as per rules)", "application_start": "", "application_end": "", "exam_date": "", "notification_url": "https://kpsc.kar.nic.in/", "portal_url": "https://kpsc.kar.nic.in/", "source": "KPSC Official", "source_date": ""},
+    {"id": "kpsc-sda", "title": "KPSC Second Division Assistant (SDA)", "organization": "Karnataka Public Service Commission", "category": "Karnataka PSC", "state": "Karnataka", "qualification": "10+2 / PUC pass", "vacancies": 0, "age_limit": "18–35 years", "application_start": "", "application_end": "", "exam_date": "", "notification_url": "https://kpsc.kar.nic.in/", "portal_url": "https://kpsc.kar.nic.in/", "source": "KPSC Official", "source_date": ""},
+    {"id": "kpsc-group-c", "title": "KPSC Group C Recruitment", "organization": "Karnataka Public Service Commission", "category": "Karnataka PSC", "state": "Karnataka", "qualification": "10th / SSLC / 10+2 (varies)", "vacancies": 0, "age_limit": "18–35 years", "application_start": "", "application_end": "", "exam_date": "", "notification_url": "https://kpsc.kar.nic.in/", "portal_url": "https://kpsc.kar.nic.in/", "source": "KPSC Official", "source_date": ""},
+    {"id": "lic-aao", "title": "LIC Assistant Administrative Officer (AAO)", "organization": "Life Insurance Corporation of India", "category": "Insurance", "state": "All", "qualification": "Any graduate degree", "vacancies": 0, "age_limit": "21–30 years", "application_start": "", "application_end": "", "exam_date": "", "notification_url": "https://licindia.in/careers", "portal_url": "https://licindia.in/careers", "source": "LIC Official", "source_date": ""},
+    {"id": "defence-agniveer", "title": "Agnipath Scheme – Agniveer Recruitment", "organization": "Indian Armed Forces (Army/Navy/Air Force)", "category": "Defence", "state": "All", "qualification": "10th/12th (varies by service and trade)", "vacancies": 0, "age_limit": "17.5–23 years", "application_start": "", "application_end": "", "exam_date": "", "notification_url": "https://joinindianarmy.nic.in/", "portal_url": "https://agnipathscheme.gov.in/", "source": "Ministry of Defence", "source_date": ""},
+]
+
+_KARNATAKA_SERVICES_SEED = [
+    {"id": "seva-sindhu", "department": "Karnataka e-Governance Services", "service_name": "Seva Sindhu – Government to Citizen Services", "category": "Portal", "description": "One-stop portal for Karnataka government certificates, services and applications.", "eligibility": "All Karnataka residents", "required_docs": '["Aadhaar card","Relevant supporting documents as per service"]', "procedure": "Register on sevasindhu.karnataka.gov.in, select the service, fill the form, upload documents and pay fee.", "portal_url": "https://sevasindhu.karnataka.gov.in/", "contact": "Helpline: 080-44554455", "fees": "Varies by service"},
+    {"id": "bhoomi", "department": "Karnataka Revenue Department", "service_name": "Bhoomi – Land Records Management", "category": "Land Records", "description": "Online access to RTC (Pahani), mutation records and land documents.", "eligibility": "All landowners and citizens in Karnataka", "required_docs": '["Survey number","Aadhaar (for authenticated copies)"]', "procedure": "Visit landrecords.karnataka.gov.in, select district/taluk/village/survey number, view or download records.", "portal_url": "https://landrecords.karnataka.gov.in/", "contact": "Bhoomi Helpline: 080-22113456", "fees": "Free for view; certified copy: ₹10–₹30"},
+    {"id": "kaveri-online", "department": "Karnataka Registration Department", "service_name": "Kaveri Online – Property Registration & EC", "category": "Property", "description": "Online property registration, Encumbrance Certificate and document management.", "eligibility": "Property owners and buyers in Karnataka", "required_docs": '["Property documents","Aadhaar","Sale deed"]', "procedure": "Visit kaveri.karnataka.gov.in, select service (EC, registration, etc.), complete online steps and book appointment for physical registration if needed.", "portal_url": "https://kaveri.karnataka.gov.in/", "contact": "IGR Helpline: 080-22216064", "fees": "Varies by service and property value"},
+    {"id": "bbmp-services", "department": "BBMP (Bruhat Bengaluru Mahanagara Palike)", "service_name": "BBMP Citizen Services", "category": "Municipal", "description": "Property tax, trade licence, khata, birth/death certificate, solid waste and other Bengaluru city services.", "eligibility": "Residents and businesses in BBMP limits", "required_docs": '["Aadhaar card","Property documents","Business registration (for trade licence)"]', "procedure": "Visit bbmponline.karnataka.gov.in or ward office. For property tax: bbmptax.karnataka.gov.in.", "portal_url": "https://bbmponline.karnataka.gov.in/", "contact": "BBMP Helpline: 1533", "fees": "Varies by service"},
+    {"id": "bangalore-one", "department": "Karnataka e-Governance Services", "service_name": "Bangalore One – Multi-Service Citizen Centres", "category": "Service Centre", "description": "Physical centres across Bengaluru offering 450+ government services including utility payments, certificate services and applications.", "eligibility": "All Bengaluru residents", "required_docs": '["Aadhaar card","Relevant documents as per service"]', "procedure": "Walk into the nearest Bangalore One centre or visit bangaloreone.gov.in for the service list and centre locations.", "portal_url": "https://bangaloreone.gov.in/", "contact": "Helpline: 080-22229090", "fees": "Service fee of ₹10–₹30 per service"},
+    {"id": "karnataka-one", "department": "Karnataka e-Governance Services", "service_name": "Karnataka One – State Service Centres", "category": "Service Centre", "description": "Multi-service centres across Karnataka providing government services beyond Bengaluru.", "eligibility": "All Karnataka residents", "required_docs": '["Aadhaar card","Relevant documents as per service"]', "procedure": "Locate the nearest Karnataka One centre or visit karnatakaone.gov.in.", "portal_url": "https://www.karnatakaone.gov.in/", "contact": "Toll-free: 1800-425-7555", "fees": "Nominal service fee"},
+    {"id": "ipgrs-grievance", "department": "Karnataka Revenue Department", "service_name": "Karnataka iPGRS – Public Grievance Redressal", "category": "Grievance", "description": "Online public grievance portal for Karnataka government complaints and follow-up.", "eligibility": "All Karnataka residents", "required_docs": '["Personal details","Description of grievance","Supporting documents (if any)"]', "procedure": "Visit ipgrs.karnataka.gov.in, register, file grievance with department and details, track status online.", "portal_url": "https://ipgrs.karnataka.gov.in/", "contact": "Helpline: 1902", "fees": "Free"},
+    {"id": "nadakacheri", "department": "Karnataka Revenue Department", "service_name": "Nadakacheri – Certificate Services", "category": "Certificates", "description": "Online certificate services including income, caste, residence and other Revenue Department certificates.", "eligibility": "Karnataka residents", "required_docs": '["Aadhaar card","Ration card","Relevant supporting documents per certificate"]', "procedure": "Visit nadakacheri.karnataka.gov.in, register with Aadhaar OTP, select certificate service, fill form and submit.", "portal_url": "https://nadakacheri.karnataka.gov.in/", "contact": "Nadakacheri Helpline: 080-22113456", "fees": "₹20–₹50 per certificate"},
+    {"id": "bbmp-property-tax", "department": "BBMP", "service_name": "BBMP Property Tax Online Payment", "category": "Property Tax", "description": "Online property tax payment for BBMP jurisdiction properties in Bengaluru.", "eligibility": "All property owners in BBMP limits", "required_docs": '["BBMP SAS Application Number","Property details"]', "procedure": "Visit bbmptax.karnataka.gov.in, enter SAS number, verify details, pay online and download receipt.", "portal_url": "https://bbmptax.karnataka.gov.in/", "contact": "BBMP Revenue Helpline: 080-22221188", "fees": "Tax as per BBMP assessment"},
+    {"id": "rera-karnataka", "department": "Karnataka RERA", "service_name": "Karnataka RERA – Real Estate Regulatory Authority", "category": "Property", "description": "Real estate project registrations, agent licences and homebuyer complaints in Karnataka.", "eligibility": "Homebuyers, builders and real estate agents in Karnataka", "required_docs": '["Project/flat details","Builder registration number"]', "procedure": "Visit rera.karnataka.gov.in to verify project registration, file complaints or register as agent/promoter.", "portal_url": "https://rera.karnataka.gov.in/", "contact": "RERA Karnataka Helpline: 080-22208571", "fees": "Varies by registration type"},
+    {"id": "bmtc-services", "department": "BMTC", "service_name": "BMTC – Bengaluru Bus Services & Smart Card", "category": "Transport", "description": "BMTC bus route information, smart card recharge and pass services for Bengaluru.", "eligibility": "All Bengaluru commuters", "required_docs": '["Aadhaar card for passes","Photo for monthly/quarterly pass"]', "procedure": "Visit mybmtc.karnataka.gov.in for route planning, smart card info and pass renewal. Physical smart card at BMTC depots.", "portal_url": "https://mybmtc.karnataka.gov.in/", "contact": "BMTC Helpline: 080-22952222", "fees": "Smart card: ₹100 deposit; passes as per route/category"},
+    {"id": "ksrtc-booking", "department": "KSRTC", "service_name": "KSRTC – Karnataka State Road Transport Booking", "category": "Transport", "description": "Online bus ticket booking for KSRTC routes across Karnataka.", "eligibility": "All travellers", "required_docs": '["Aadhaar or any ID for validation"]', "procedure": "Visit www.ksrtc.in or use the KSRTC app for online booking.", "portal_url": "https://www.ksrtc.in/", "contact": "KSRTC Helpline: 1800-425-1663", "fees": "Ticket price varies by route and class"},
+    {"id": "artisan-registration", "department": "Karnataka Department of Handlooms & Textiles", "service_name": "Karnataka Artisan & Handloom Registration", "category": "Artisan", "description": "Registration for weavers, artisans and handicraft workers to access government support schemes.", "eligibility": "Weavers, artisans and craftspeople in Karnataka", "required_docs": '["Aadhaar card","Proof of craft/weaving activity","Bank account"]', "procedure": "Contact the District Handlooms and Textiles office or visit the Karnataka Handloom development department portal.", "portal_url": "https://khtdc.karnataka.gov.in/", "contact": "Department of Handlooms & Textiles: 080-22251700", "fees": "Free registration"},
+    {"id": "eseva-centre", "department": "Karnataka e-Governance Services", "service_name": "eSeva – Digital Citizen Services", "category": "Portal", "description": "Digital platform for government service delivery in Karnataka.", "eligibility": "All Karnataka citizens", "required_docs": '["Aadhaar card","Relevant documents per service"]', "procedure": "Access through Seva Sindhu or Bangalore One portals.", "portal_url": "https://sevasindhu.karnataka.gov.in/", "contact": "1902", "fees": "Varies"},
+    {"id": "khadi-registration", "department": "Karnataka Khadi & Village Industries", "service_name": "KVIC / Karnataka Khadi Registration & Grants", "category": "Entrepreneur", "description": "Registration for Khadi and village industries practitioners to access PMEGP and other grants.", "eligibility": "Artisans, rural entrepreneurs and self-help groups", "required_docs": '["Aadhaar","Business address proof","Bank account","Project report"]', "procedure": "Visit KVIC portal (kvic.gov.in) or Karnataka State Khadi & Village Industries Board for PMEGP applications.", "portal_url": "https://kvic.gov.in/", "contact": "KVIC Helpline: 1800-7000-7000", "fees": "Free"},
+]
+
+
+def _seed_part_b_data():
+    """Seed gov_documents, gov_schemes, gov_jobs and karnataka_services tables if empty."""
+    with get_connection() as conn:
+        # gov_documents
+        if conn.execute("SELECT COUNT(*) FROM gov_documents").fetchone()[0] == 0:
+            for doc in _GOV_DOCUMENTS_SEED:
+                conn.execute(
+                    """INSERT OR IGNORE INTO gov_documents
+                    (id,name,category,authority,state,eligibility,required_docs,steps,
+                     official_url,fees,processing_time,renewal_info,common_mistakes,faqs)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (doc["id"], doc["name"], doc["category"], doc["authority"], doc["state"],
+                     doc["eligibility"], doc["required_docs"], doc["steps"], doc["official_url"],
+                     doc["fees"], doc["processing_time"], doc["renewal_info"],
+                     doc["common_mistakes"], doc["faqs"]),
+                )
+
+        # gov_schemes
+        if conn.execute("SELECT COUNT(*) FROM gov_schemes").fetchone()[0] == 0:
+            for s in _GOV_SCHEMES_SEED:
+                conn.execute(
+                    """INSERT OR IGNORE INTO gov_schemes
+                    (id,name,category,level,state,audience,description,eligibility_rules,
+                     benefits,required_docs,application_url,deadline,source,source_url,verified_on)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (s["id"], s["name"], s["category"], s["level"], s["state"], s["audience"],
+                     s["description"], s["eligibility_rules"], s["benefits"], s["required_docs"],
+                     s["application_url"], s["deadline"], s["source"], s["source_url"], s["verified_on"]),
+                )
+
+        # gov_jobs
+        if conn.execute("SELECT COUNT(*) FROM gov_jobs").fetchone()[0] == 0:
+            for j in _GOV_JOBS_SEED:
+                conn.execute(
+                    """INSERT OR IGNORE INTO gov_jobs
+                    (id,title,organization,category,state,qualification,vacancies,age_limit,
+                     application_start,application_end,exam_date,notification_url,portal_url,source,source_date)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (j["id"], j["title"], j["organization"], j["category"], j["state"],
+                     j["qualification"], j["vacancies"], j["age_limit"],
+                     j["application_start"], j["application_end"], j["exam_date"],
+                     j["notification_url"], j["portal_url"], j["source"], j["source_date"]),
+                )
+
+        # karnataka_services
+        if conn.execute("SELECT COUNT(*) FROM karnataka_services").fetchone()[0] == 0:
+            for ks in _KARNATAKA_SERVICES_SEED:
+                conn.execute(
+                    """INSERT OR IGNORE INTO karnataka_services
+                    (id,department,service_name,category,description,eligibility,
+                     required_docs,procedure,portal_url,contact,fees)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (ks["id"], ks["department"], ks["service_name"], ks["category"],
+                     ks["description"], ks["eligibility"], ks["required_docs"], ks["procedure"],
+                     ks["portal_url"], ks["contact"], ks["fees"]),
+                )
+
+
+_seed_part_b_data()
+
+
+# ---------------------------------------------------------------------------
+# Government Documents API
+# ---------------------------------------------------------------------------
+
+@app.get("/api/gov-documents")
+def api_gov_documents(category: str = "", state: str = "", q: str = "") -> dict:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id,name,category,authority,state,eligibility,official_url,fees,processing_time FROM gov_documents ORDER BY category,name"
+        ).fetchall()
+    items = [dict(r) for r in rows]
+    if category:
+        items = [i for i in items if i["category"].lower() == category.lower()]
+    if state and state.lower() not in ("all", ""):
+        items = [i for i in items if i["state"].lower() in ("all", state.lower())]
+    if q:
+        q_lower = q.lower()
+        items = [i for i in items if q_lower in i["name"].lower() or q_lower in i["category"].lower()]
+    return {"documents": items, "count": len(items), "source_note": "Official government portal links only. Always verify current requirements on the linked portals."}
+
+
+@app.get("/api/gov-documents/{doc_id}")
+def api_gov_document_detail(doc_id: str) -> dict:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM gov_documents WHERE id = ?", (doc_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Document guide not found.")
+    item = dict(row)
+    for field in ("required_docs", "steps", "faqs"):
+        try:
+            item[field] = _json.loads(item[field])
+        except Exception:
+            item[field] = []
+    return {"document": item, "source_note": "Information is for guidance only. Requirements change. Always verify on the official portal."}
+
+
+class GovDocCreate(BaseModel):
+    id: str = Field(min_length=2, max_length=60)
+    name: str = Field(min_length=2, max_length=200)
+    category: str = Field(min_length=2, max_length=80)
+    authority: str = Field(default="", max_length=200)
+    state: str = Field(default="All", max_length=60)
+    eligibility: str = Field(default="", max_length=1000)
+    required_docs: str = Field(default="[]", max_length=3000)
+    steps: str = Field(default="[]", max_length=5000)
+    official_url: str = Field(default="", max_length=500)
+    fees: str = Field(default="", max_length=200)
+    processing_time: str = Field(default="", max_length=200)
+    renewal_info: str = Field(default="", max_length=1000)
+    common_mistakes: str = Field(default="", max_length=1000)
+    faqs: str = Field(default="[]", max_length=5000)
+
+
+@app.post("/api/gov-documents", status_code=201)
+def api_gov_documents_create(payload: GovDocCreate, x_admin_session: str = Header(default="")) -> dict:
+    with get_connection() as conn:
+        require_admin_session(conn, x_admin_session)
+        conn.execute(
+            """INSERT INTO gov_documents (id,name,category,authority,state,eligibility,required_docs,
+               steps,official_url,fees,processing_time,renewal_info,common_mistakes,faqs)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (payload.id, payload.name, payload.category, payload.authority, payload.state,
+             payload.eligibility, payload.required_docs, payload.steps, payload.official_url,
+             payload.fees, payload.processing_time, payload.renewal_info,
+             payload.common_mistakes, payload.faqs),
+        )
+    return {"created": True, "id": payload.id}
+
+
+# ---------------------------------------------------------------------------
+# Government Schemes API
+# ---------------------------------------------------------------------------
+
+@app.get("/api/gov-schemes")
+def api_gov_schemes(category: str = "", level: str = "", state: str = "", q: str = "") -> dict:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id,name,category,level,state,audience,description,benefits,application_url,deadline,source,source_url,verified_on FROM gov_schemes ORDER BY level,category,name"
+        ).fetchall()
+    items = [dict(r) for r in rows]
+    if category:
+        items = [i for i in items if i["category"].lower() == category.lower()]
+    if level:
+        items = [i for i in items if i["level"].lower() == level.lower()]
+    if state and state.lower() not in ("all", ""):
+        items = [i for i in items if i["state"].lower() in ("all", state.lower())]
+    if q:
+        q_lower = q.lower()
+        items = [i for i in items if q_lower in i["name"].lower() or q_lower in i["description"].lower() or q_lower in i["audience"].lower()]
+    return {"schemes": items, "count": len(items), "source_note": "Verified from official government portals. Eligibility rules may change. Always verify on the linked portal."}
+
+
+@app.get("/api/gov-schemes/{scheme_id}")
+def api_gov_scheme_detail(scheme_id: str) -> dict:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM gov_schemes WHERE id = ?", (scheme_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Scheme not found.")
+    item = dict(row)
+    for field in ("required_docs",):
+        try:
+            item[field] = _json.loads(item[field])
+        except Exception:
+            item[field] = []
+    try:
+        item["eligibility_rules"] = _json.loads(item["eligibility_rules"])
+    except Exception:
+        pass
+    return {"scheme": item}
+
+
+class GovSchemeCreate(BaseModel):
+    id: str = Field(min_length=2, max_length=80)
+    name: str = Field(min_length=2, max_length=200)
+    category: str = Field(min_length=2, max_length=60)
+    level: str = Field(default="Central", max_length=40)
+    state: str = Field(default="All", max_length=60)
+    audience: str = Field(default="", max_length=300)
+    description: str = Field(default="", max_length=2000)
+    eligibility_rules: str = Field(default="{}", max_length=3000)
+    benefits: str = Field(default="", max_length=1000)
+    required_docs: str = Field(default="[]", max_length=3000)
+    application_url: str = Field(default="", max_length=500)
+    deadline: str = Field(default="", max_length=200)
+    source: str = Field(default="", max_length=200)
+    source_url: str = Field(default="", max_length=500)
+    verified_on: str = Field(default="", max_length=20)
+
+
+@app.post("/api/gov-schemes", status_code=201)
+def api_gov_schemes_create(payload: GovSchemeCreate, x_admin_session: str = Header(default="")) -> dict:
+    with get_connection() as conn:
+        require_admin_session(conn, x_admin_session)
+        conn.execute(
+            """INSERT INTO gov_schemes (id,name,category,level,state,audience,description,
+               eligibility_rules,benefits,required_docs,application_url,deadline,source,source_url,verified_on)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (payload.id, payload.name, payload.category, payload.level, payload.state,
+             payload.audience, payload.description, payload.eligibility_rules, payload.benefits,
+             payload.required_docs, payload.application_url, payload.deadline,
+             payload.source, payload.source_url, payload.verified_on),
+        )
+    return {"created": True, "id": payload.id}
+
+
+# ---------------------------------------------------------------------------
+# Government Jobs API
+# ---------------------------------------------------------------------------
+
+@app.get("/api/gov-jobs")
+def api_gov_jobs(category: str = "", state: str = "", q: str = "") -> dict:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id,title,organization,category,state,qualification,vacancies,age_limit,application_end,exam_date,notification_url,portal_url,source FROM gov_jobs ORDER BY category,title"
+        ).fetchall()
+    items = [dict(r) for r in rows]
+    if category:
+        items = [i for i in items if i["category"].lower() == category.lower()]
+    if state and state.lower() not in ("all", ""):
+        items = [i for i in items if i["state"].lower() in ("all", state.lower())]
+    if q:
+        q_lower = q.lower()
+        items = [i for i in items if q_lower in i["title"].lower() or q_lower in i["organization"].lower() or q_lower in i["category"].lower()]
+    return {"jobs": items, "count": len(items), "note": "Vacancy numbers and dates shown here are from seed data. Always check the official notification URL for current figures."}
+
+
+@app.get("/api/gov-jobs/{job_id}")
+def api_gov_job_detail(job_id: str) -> dict:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM gov_jobs WHERE id = ?", (job_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Job notice not found.")
+    return {"job": dict(row)}
+
+
+class GovJobCreate(BaseModel):
+    id: str = Field(min_length=2, max_length=80)
+    title: str = Field(min_length=2, max_length=300)
+    organization: str = Field(min_length=2, max_length=200)
+    category: str = Field(default="", max_length=80)
+    state: str = Field(default="All", max_length=60)
+    qualification: str = Field(default="", max_length=300)
+    vacancies: int = Field(default=0, ge=0)
+    age_limit: str = Field(default="", max_length=200)
+    application_start: str = Field(default="", max_length=20)
+    application_end: str = Field(default="", max_length=20)
+    exam_date: str = Field(default="", max_length=20)
+    notification_url: str = Field(default="", max_length=500)
+    portal_url: str = Field(default="", max_length=500)
+    source: str = Field(default="", max_length=200)
+    source_date: str = Field(default="", max_length=20)
+
+
+@app.post("/api/gov-jobs", status_code=201)
+def api_gov_jobs_create(payload: GovJobCreate, x_admin_session: str = Header(default="")) -> dict:
+    with get_connection() as conn:
+        require_admin_session(conn, x_admin_session)
+        conn.execute(
+            """INSERT INTO gov_jobs (id,title,organization,category,state,qualification,vacancies,
+               age_limit,application_start,application_end,exam_date,notification_url,portal_url,source,source_date)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (payload.id, payload.title, payload.organization, payload.category, payload.state,
+             payload.qualification, payload.vacancies, payload.age_limit,
+             payload.application_start, payload.application_end, payload.exam_date,
+             payload.notification_url, payload.portal_url, payload.source, payload.source_date),
+        )
+    return {"created": True, "id": payload.id}
+
+
+# ---------------------------------------------------------------------------
+# Government Application Tracker (extended)
+# ---------------------------------------------------------------------------
+
+class AppTrackingCreate(BaseModel):
+    department: str = Field(min_length=2, max_length=200)
+    application_type: str = Field(min_length=2, max_length=200)
+    reference_number: str = Field(default="", max_length=200)
+    submission_date: str = Field(default="", max_length=20)
+    status: str = Field(default="Draft", max_length=60)
+    notes: str = Field(default="", max_length=1000)
+    official_url: str = Field(default="", max_length=500)
+
+
+class AppTrackingUpdate(BaseModel):
+    status: str = Field(default="", max_length=60)
+    notes: str = Field(default="", max_length=1000)
+    reference_number: str = Field(default="", max_length=200)
+
+
+@app.get("/api/app-tracking")
+def api_app_tracking_list(x_civic_session: str = Header(default="")) -> dict:
+    with get_connection() as conn:
+        user = require_session(conn, x_civic_session)
+        rows = conn.execute(
+            "SELECT id,department,application_type,reference_number,submission_date,status,notes,official_url,created_at,updated_at FROM app_tracking_ext WHERE user_id=? ORDER BY created_at DESC",
+            (user["id"],),
+        ).fetchall()
+    return {"applications": [dict(r) for r in rows]}
+
+
+@app.post("/api/app-tracking", status_code=201)
+def api_app_tracking_create(payload: AppTrackingCreate, x_civic_session: str = Header(default="")) -> dict:
+    with get_connection() as conn:
+        user = require_session(conn, x_civic_session)
+        new_id = uuid4().hex
+        now = utc_now()
+        conn.execute(
+            """INSERT INTO app_tracking_ext
+            (id,user_id,department,application_type,reference_number,submission_date,status,notes,official_url,created_at,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (new_id, user["id"], payload.department, payload.application_type,
+             payload.reference_number, payload.submission_date, payload.status,
+             payload.notes, payload.official_url, now, now),
+        )
+    return {"created": True, "id": new_id}
+
+
+@app.put("/api/app-tracking/{item_id}")
+def api_app_tracking_update(item_id: str, payload: AppTrackingUpdate, x_civic_session: str = Header(default="")) -> dict:
+    with get_connection() as conn:
+        user = require_session(conn, x_civic_session)
+        row = conn.execute("SELECT id FROM app_tracking_ext WHERE id=? AND user_id=?", (item_id, user["id"])).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Application not found.")
+        updates, params = [], []
+        if payload.status:
+            updates.append("status=?"); params.append(payload.status)
+        if payload.notes is not None:
+            updates.append("notes=?"); params.append(payload.notes)
+        if payload.reference_number is not None:
+            updates.append("reference_number=?"); params.append(payload.reference_number)
+        updates.append("updated_at=?"); params.append(utc_now())
+        params.extend([item_id, user["id"]])
+        if len(updates) > 1:
+            conn.execute(f"UPDATE app_tracking_ext SET {', '.join(updates)} WHERE id=? AND user_id=?", params)
+    return {"updated": True}
+
+
+@app.delete("/api/app-tracking/{item_id}", status_code=204)
+def api_app_tracking_delete(item_id: str, x_civic_session: str = Header(default="")) -> None:
+    with get_connection() as conn:
+        user = require_session(conn, x_civic_session)
+        result = conn.execute("DELETE FROM app_tracking_ext WHERE id=? AND user_id=?", (item_id, user["id"]))
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Application not found.")
+
+
+# ---------------------------------------------------------------------------
+# RTI / Grievance Drafts API
+# ---------------------------------------------------------------------------
+
+class RTIGrievanceCreate(BaseModel):
+    type: str = Field(default="grievance", max_length=20)
+    department: str = Field(default="", max_length=200)
+    subject: str = Field(min_length=4, max_length=300)
+    draft_text: str = Field(default="", max_length=5000)
+    notes: str = Field(default="", max_length=500)
+    portal_url: str = Field(default="", max_length=500)
+
+
+class RTIGrievanceUpdate(BaseModel):
+    subject: str = Field(default="", max_length=300)
+    draft_text: str = Field(default="", max_length=5000)
+    status: str = Field(default="", max_length=40)
+    reference_number: str = Field(default="", max_length=200)
+    notes: str = Field(default="", max_length=500)
+
+
+@app.get("/api/rti-grievances")
+def api_rti_list(x_civic_session: str = Header(default="")) -> dict:
+    with get_connection() as conn:
+        user = require_session(conn, x_civic_session)
+        rows = conn.execute(
+            "SELECT id,type,department,subject,status,reference_number,portal_url,created_at,updated_at FROM rti_grievances WHERE user_id=? ORDER BY created_at DESC",
+            (user["id"],),
+        ).fetchall()
+    return {
+        "drafts": [dict(r) for r in rows],
+        "official_portals": {
+            "RTI Online": "https://rtionline.gov.in/",
+            "Karnataka iPGRS": "https://ipgrs.karnataka.gov.in/",
+            "CPGRAMS": "https://pgportal.gov.in/",
+        },
+    }
+
+
+@app.get("/api/rti-grievances/{item_id}")
+def api_rti_detail(item_id: str, x_civic_session: str = Header(default="")) -> dict:
+    with get_connection() as conn:
+        user = require_session(conn, x_civic_session)
+        row = conn.execute("SELECT * FROM rti_grievances WHERE id=? AND user_id=?", (item_id, user["id"])).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    return {"draft": dict(row)}
+
+
+@app.post("/api/rti-grievances", status_code=201)
+def api_rti_create(payload: RTIGrievanceCreate, x_civic_session: str = Header(default="")) -> dict:
+    if payload.type not in ("rti", "grievance"):
+        raise HTTPException(status_code=422, detail="type must be 'rti' or 'grievance'.")
+    with get_connection() as conn:
+        user = require_session(conn, x_civic_session)
+        new_id = uuid4().hex
+        now = utc_now()
+        conn.execute(
+            """INSERT INTO rti_grievances (id,user_id,type,department,subject,draft_text,notes,portal_url,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (new_id, user["id"], payload.type, payload.department, payload.subject,
+             payload.draft_text, payload.notes, payload.portal_url, now, now),
+        )
+    return {"created": True, "id": new_id}
+
+
+@app.put("/api/rti-grievances/{item_id}")
+def api_rti_update(item_id: str, payload: RTIGrievanceUpdate, x_civic_session: str = Header(default="")) -> dict:
+    with get_connection() as conn:
+        user = require_session(conn, x_civic_session)
+        row = conn.execute("SELECT id FROM rti_grievances WHERE id=? AND user_id=?", (item_id, user["id"])).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Draft not found.")
+        updates, params = [], []
+        for field, val in [("subject", payload.subject), ("draft_text", payload.draft_text),
+                           ("status", payload.status), ("reference_number", payload.reference_number),
+                           ("notes", payload.notes)]:
+            if val:
+                updates.append(f"{field}=?"); params.append(val)
+        updates.append("updated_at=?"); params.append(utc_now())
+        params.extend([item_id, user["id"]])
+        conn.execute(f"UPDATE rti_grievances SET {', '.join(updates)} WHERE id=? AND user_id=?", params)
+    return {"updated": True}
+
+
+@app.delete("/api/rti-grievances/{item_id}", status_code=204)
+def api_rti_delete(item_id: str, x_civic_session: str = Header(default="")) -> None:
+    with get_connection() as conn:
+        user = require_session(conn, x_civic_session)
+        result = conn.execute("DELETE FROM rti_grievances WHERE id=? AND user_id=?", (item_id, user["id"]))
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Draft not found.")
+
+
+# ---------------------------------------------------------------------------
+# Karnataka Services Directory API
+# ---------------------------------------------------------------------------
+
+@app.get("/api/karnataka-services")
+def api_karnataka_services(department: str = "", category: str = "", q: str = "") -> dict:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id,department,service_name,category,description,portal_url,contact,fees FROM karnataka_services ORDER BY department,service_name"
+        ).fetchall()
+    items = [dict(r) for r in rows]
+    if department:
+        items = [i for i in items if department.lower() in i["department"].lower()]
+    if category:
+        items = [i for i in items if i["category"].lower() == category.lower()]
+    if q:
+        q_lower = q.lower()
+        items = [i for i in items if q_lower in i["service_name"].lower() or q_lower in i["department"].lower() or q_lower in i["description"].lower()]
+    return {"services": items, "count": len(items)}
+
+
+@app.get("/api/karnataka-services/{service_id}")
+def api_karnataka_service_detail(service_id: str) -> dict:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM karnataka_services WHERE id=?", (service_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Service not found.")
+    item = dict(row)
+    try:
+        item["required_docs"] = _json.loads(item["required_docs"])
+    except Exception:
+        item["required_docs"] = []
+    return {"service": item}
+
+
+class KarnatakaServiceCreate(BaseModel):
+    id: str = Field(min_length=2, max_length=80)
+    department: str = Field(min_length=2, max_length=200)
+    service_name: str = Field(min_length=2, max_length=200)
+    category: str = Field(default="", max_length=80)
+    description: str = Field(default="", max_length=1000)
+    eligibility: str = Field(default="", max_length=500)
+    required_docs: str = Field(default="[]", max_length=2000)
+    procedure: str = Field(default="", max_length=2000)
+    portal_url: str = Field(min_length=4, max_length=500)
+    contact: str = Field(default="", max_length=200)
+    fees: str = Field(default="", max_length=200)
+
+
+@app.post("/api/karnataka-services", status_code=201)
+def api_karnataka_services_create(payload: KarnatakaServiceCreate, x_admin_session: str = Header(default="")) -> dict:
+    with get_connection() as conn:
+        require_admin_session(conn, x_admin_session)
+        conn.execute(
+            """INSERT INTO karnataka_services (id,department,service_name,category,description,eligibility,
+               required_docs,procedure,portal_url,contact,fees) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (payload.id, payload.department, payload.service_name, payload.category,
+             payload.description, payload.eligibility, payload.required_docs, payload.procedure,
+             payload.portal_url, payload.contact, payload.fees),
+        )
+    return {"created": True, "id": payload.id}
+
+
+# ---------------------------------------------------------------------------
+# User Saved Items API
+# ---------------------------------------------------------------------------
+
+class SavedItemCreate(BaseModel):
+    item_type: str = Field(min_length=2, max_length=40)
+    item_id: str = Field(min_length=1, max_length=80)
+    item_name: str = Field(default="", max_length=300)
+    reminder_date: str = Field(default="", max_length=20)
+    notes: str = Field(default="", max_length=500)
+
+
+@app.get("/api/saved-items")
+def api_saved_items_list(item_type: str = "", x_civic_session: str = Header(default="")) -> dict:
+    with get_connection() as conn:
+        user = require_session(conn, x_civic_session)
+        if item_type:
+            rows = conn.execute(
+                "SELECT id,item_type,item_id,item_name,reminder_date,notes,created_at FROM user_saved_items WHERE user_id=? AND item_type=? ORDER BY created_at DESC",
+                (user["id"], item_type),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id,item_type,item_id,item_name,reminder_date,notes,created_at FROM user_saved_items WHERE user_id=? ORDER BY created_at DESC",
+                (user["id"],),
+            ).fetchall()
+    return {"saved_items": [dict(r) for r in rows]}
+
+
+@app.post("/api/saved-items", status_code=201)
+def api_saved_items_create(payload: SavedItemCreate, x_civic_session: str = Header(default="")) -> dict:
+    if payload.item_type not in ("scheme", "job", "document", "service", "opportunity"):
+        raise HTTPException(status_code=422, detail="item_type must be one of: scheme, job, document, service, opportunity.")
+    with get_connection() as conn:
+        user = require_session(conn, x_civic_session)
+        new_id = uuid4().hex
+        try:
+            conn.execute(
+                "INSERT INTO user_saved_items (id,user_id,item_type,item_id,item_name,reminder_date,notes,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (new_id, user["id"], payload.item_type, payload.item_id, payload.item_name,
+                 payload.reminder_date, payload.notes, utc_now()),
+            )
+        except Exception:
+            raise HTTPException(status_code=409, detail="Item already saved.")
+    return {"created": True, "id": new_id}
+
+
+@app.delete("/api/saved-items/{item_id}", status_code=204)
+def api_saved_items_delete(item_id: str, x_civic_session: str = Header(default="")) -> None:
+    with get_connection() as conn:
+        user = require_session(conn, x_civic_session)
+        result = conn.execute("DELETE FROM user_saved_items WHERE id=? AND user_id=?", (item_id, user["id"]))
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Saved item not found.")

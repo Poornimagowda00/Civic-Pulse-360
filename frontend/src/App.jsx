@@ -3053,6 +3053,9 @@ function AuthScreen({ onAuthenticated }) {
         ? { full_name: form.fullName, email: form.email, mobile: form.mobile, password: form.password }
         : { email: form.email, password: form.password }
       const result = await request(mode === 'register' ? '/auth/register' : '/auth/login', { method: 'POST', body })
+      if (!result || typeof result.session_token !== 'string' || !result.session_token || !result.user) {
+        throw new ApiError('The authentication service returned an invalid session response. Please try again.', 502)
+      }
       onAuthenticated(result.session_token, result.user)
     } catch (error) {
       setError(error.message || 'Unable to continue. Please try again.')

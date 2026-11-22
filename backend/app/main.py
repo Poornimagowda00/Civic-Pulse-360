@@ -67,6 +67,7 @@ allowed_origins = os.getenv(
     "CORS_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173",
 ).split(",")
+allowed_origins = [origin.strip().rstrip("/") for origin in allowed_origins if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in allowed_origins if origin.strip()],
@@ -74,6 +75,18 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+@app.get("/")
+def service_status() -> dict:
+    """Return a small status payload for platform probes and human visitors."""
+    return {
+        "service": "Civic Pulse 360 API",
+        "status": "ok",
+        "docs": "/docs",
+        "openapi": "/openapi.json",
+        "health": "/api/health",
+    }
 
 
 @contextmanager

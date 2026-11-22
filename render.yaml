@@ -35,4 +35,4 @@ services:
     autoDeployTrigger: "off"
     envVars:
       - key: VITE_API_BASE
-        sync: false
+        value: https://civic-pulse-360.onrender.com/api

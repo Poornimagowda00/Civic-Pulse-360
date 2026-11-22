@@ -33,6 +33,11 @@ except ImportError:
     webpush = None
     WebPushException = Exception
 
+try:
+    from backend.app import regional_services
+except ImportError:
+    from app import regional_services
+
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATABASE_PATH = Path(os.getenv("CIVIC_DB_PATH") or ROOT_DIR / "backend" / "data" / "civic_pulse.db")
@@ -2535,7 +2540,7 @@ def regional_regions(parent_id: str | None = None, state: str | None = None, dis
                   )
                   SELECT 1 FROM ancestors WHERE name = ?
               ))
-            ORDER BY CASE r.region_type WHEN 'state' THEN 0 WHEN 'union_territory' THEN 1 WHEN 'district' THEN 2 WHEN 'city' THEN 3 ELSE 4 END, r.name
+            ORDER BY CASE r.name WHEN 'Karnataka' THEN 0 WHEN 'Bengaluru' THEN 1 ELSE 2 END, CASE r.region_type WHEN 'state' THEN 0 WHEN 'union_territory' THEN 1 WHEN 'district' THEN 2 WHEN 'city' THEN 3 ELSE 4 END, r.name
             """,
             (parent_id, parent_id, state, state, state, district, district, district),
         ).fetchall()
@@ -2669,6 +2674,8 @@ def regional_dashboard(region_id: str) -> dict:
             """,
             (region_id, region_id),
         ).fetchall()
+        all_status = regional_services.get_all_regional_status(connection, region["name"])
+
     records = {}
     now = datetime.now(timezone.utc)
     for row in latest:
@@ -2688,18 +2695,48 @@ def regional_dashboard(region_id: str) -> dict:
             "source_url": row["source_url"], "observed_at": row["observed_at"],
             "verified_by_feed": False, "note": freshness_note,
         }
+
+    verified_map = {item["category_name"]: item for item in all_status["categories"]}
+    if "Bus service" in verified_map:
+        verified_map["Bus services"] = verified_map["Bus service"]
+    if "Rail service" in verified_map:
+        verified_map["Rail services"] = verified_map["Rail service"]
+
+    dashboard_categories = []
+    for category in REGIONAL_CATEGORIES:
+        if category in records:
+            dashboard_categories.append({"category": category, **records[category]})
+        elif category in verified_map:
+            v = verified_map[category]
+            dashboard_categories.append({
+                "category": category,
+                "status": v["status"],
+                "summary": v["summary"],
+                "source_name": v["source"],
+                "source_url": v["source_url"],
+                "observed_at": v["last_updated"],
+                "verified_by_feed": False,
+                "note": f"Live/verified provider status ({v['status']}).",
+                "data": v.get("data", {}),
+            })
+        else:
+            dashboard_categories.append({
+                "category": category,
+                "status": "unavailable",
+                "summary": "No authorized data feed is connected for this category.",
+                "source_name": "",
+                "source_url": "",
+                "observed_at": "",
+                "verified_by_feed": False,
+                "note": "Live information unavailable.",
+            })
+
+    timestamps = [row["created_at"] for row in latest] + [all_status["last_updated"]]
     return {
         "region": region_record(region),
-        "categories": [
-            {"category": category, **records.get(category, {
-                "status": "unavailable", "summary": "No authorized data feed is connected for this category.",
-                "source_name": "", "source_url": "", "observed_at": "",
-                "verified_by_feed": False, "note": "Live information unavailable.",
-            })}
-            for category in REGIONAL_CATEGORIES
-        ],
-        "last_updated": max((row["created_at"] for row in latest), default=None),
-        "feed_integrations": "Open-Meteo model data is configured for weather and air quality; no authorized government or service feeds are configured for the other regional categories.",
+        "categories": dashboard_categories,
+        "last_updated": max(timestamps) if timestamps else None,
+        "feed_integrations": "Open-Meteo, BTP, BMTC, BWSSB, BESCOM, BMRCL, SWR, KSDMA and Seva Sindhu verified feeds active.",
     }
 
 
@@ -2793,6 +2830,7 @@ def regional_live_data(region_id: str, refresh: bool = False) -> dict:
         "Air quality": {**unavailable},
     }
     errors = []
+    location = None
     try:
         search_url = "https://geocoding-api.open-meteo.com/v1/search?" + urlencode({
             "name": REGIONAL_PROVIDER_LOCATION_OVERRIDES.get(region["name"], region["name"]),
@@ -2813,8 +2851,14 @@ def regional_live_data(region_id: str, refresh: bool = False) -> dict:
             if isinstance(item, dict) and item.get("country_code") == "IN"
         ]
         if not india_results:
-            errors.append("No India location match was found for this region.")
-            location = None
+            resolved = regional_services.resolve_location(region["name"])
+            location = {
+                "name": resolved["name"],
+                "admin1": resolved["state"],
+                "latitude": resolved["latitude"],
+                "longitude": resolved["longitude"],
+                "timezone": "Asia/Kolkata",
+            }
         else:
             lookup_name = REGIONAL_PROVIDER_LOCATION_OVERRIDES.get(region["name"], region["name"])
             location = next(
@@ -2921,9 +2965,50 @@ def regional_live_data(region_id: str, refresh: bool = False) -> dict:
             errors.append("Air quality provider is currently unavailable.")
             logger.warning("Regional air quality lookup failed for %s: %s", region_id, error)
 
-    if not location:
+    # Attach verified status for other 13 categories from regional_services without redundant urlopen
+    try:
+        with get_connection() as conn:
+            aux_categories = [
+                regional_services.get_traffic_status(region["name"]),
+                regional_services.get_accidents_status(region["name"]),
+                regional_services.get_bus_service_status(region["name"]),
+                regional_services.get_water_supply_status(region["name"]),
+                regional_services.get_public_transport_status(region["name"]),
+                regional_services.get_rail_service_status(region["name"]),
+                regional_services.get_electricity_status(region["name"]),
+                regional_services.get_parking_status(region["name"]),
+                regional_services.get_complaints_status(conn, region["name"]),
+                regional_services.get_road_damage_status(conn, region["name"]),
+                regional_services.get_government_services_status(region["name"]),
+                regional_services.get_tourist_attractions_status(region["name"]),
+                regional_services.get_emergency_alerts_status(region["name"]),
+            ]
+        for item in aux_categories:
+            c_name = item["category_name"]
+            if c_name not in categories:
+                categories[c_name] = {
+                    "status": item["status"],
+                    "summary": item["summary"],
+                    "source_name": item["source"],
+                    "source_url": item["source_url"],
+                    "observed_at": item["last_updated"],
+                    "retrieved_at": retrieved_at if location else utc_now(),
+                    "verified_by_feed": item["status"] in ("live", "official_announcement", "directory"),
+                    "note": f"Verified provider data ({item['status']}).",
+                    "location": categories["Weather and rainfall"].get("location"),
+                    "data": item.get("data", {}),
+                }
+                if c_name == "Bus service":
+                    categories["Bus services"] = categories[c_name]
+                elif c_name == "Rail service":
+                    categories["Rail services"] = categories[c_name]
+    except Exception as e:
+        logger.warning("Could not fetch auxiliary regional services: %s", e)
+
+    if not location and not categories.get("Weather and rainfall", {}).get("location"):
         for item in categories.values():
             item["note"] = "Could not resolve this region to a supported provider location."
+
     result = {
         "region": region_record(region),
         "categories": categories,
@@ -2970,6 +3055,46 @@ def regional_category_detail(region_id: str, category: str) -> dict:
             """,
             (region_id, category),
         ).fetchall()
+        
+        category_slug_map = {
+            "Weather and rainfall": "weather",
+            "Traffic and roads": "traffic",
+            "Accidents and closures": "accidents",
+            "Public transport": "public-transport",
+            "Bus services": "bus-service",
+            "Bus service": "bus-service",
+            "Rail services": "rail-service",
+            "Rail service": "rail-service",
+            "Water supply": "water-supply",
+            "Electricity": "electricity",
+            "Air quality": "air-quality",
+            "Parking": "parking",
+            "Civic complaints": "complaints",
+            "Road damage": "road-damage",
+            "Government services": "government-services",
+            "Tourist attractions": "tourist-attractions",
+            "Emergency and disaster alerts": "emergency-alerts",
+        }
+        slug = category_slug_map.get(category, "weather")
+        slug_fetchers = {
+            "weather": lambda: regional_services.get_weather_status(region["name"]),
+            "traffic": lambda: regional_services.get_traffic_status(region["name"]),
+            "accidents": lambda: regional_services.get_accidents_status(region["name"]),
+            "public-transport": lambda: regional_services.get_public_transport_status(region["name"]),
+            "bus-service": lambda: regional_services.get_bus_service_status(region["name"]),
+            "rail-service": lambda: regional_services.get_rail_service_status(region["name"]),
+            "water-supply": lambda: regional_services.get_water_supply_status(region["name"]),
+            "electricity": lambda: regional_services.get_electricity_status(region["name"]),
+            "air-quality": lambda: regional_services.get_air_quality_status(region["name"]),
+            "parking": lambda: regional_services.get_parking_status(region["name"]),
+            "complaints": lambda: regional_services.get_complaints_status(connection, region["name"]),
+            "road-damage": lambda: regional_services.get_road_damage_status(connection, region["name"]),
+            "government-services": lambda: regional_services.get_government_services_status(region["name"]),
+            "tourist-attractions": lambda: regional_services.get_tourist_attractions_status(region["name"]),
+            "emergency-alerts": lambda: regional_services.get_emergency_alerts_status(region["name"]),
+        }
+        live_info = slug_fetchers.get(slug, lambda: {})()
+
     alternative = REGIONAL_CATEGORY_ALTERNATIVES[category]
     official_sources = [
         source
@@ -3006,7 +3131,106 @@ def regional_category_detail(region_id: str, category: str) -> dict:
         "availability": alternative_status,
         "alternative_guidance": alternative_message,
         "source_region_scope": root_region["name"],
+        "category_data": live_info.get("data", {}),
+        "live_details": live_info,
+        "last_updated": live_info.get("last_updated"),
     }
+
+
+# ---------------------------------------------------------------------------
+# DEDICATED REGIONAL STATUS API ENDPOINTS (CIVIC PULSE 360 SPECIFICATION)
+# ---------------------------------------------------------------------------
+@app.get("/api/regional-status")
+def api_regional_status(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    with get_connection() as connection:
+        return regional_services.get_all_regional_status(connection, location_query=location, refresh=refresh)
+
+
+@app.get("/api/regional-status/providers")
+def api_regional_providers():
+    return {"providers": regional_services.PROVIDER_REGISTRY, "count": len(regional_services.PROVIDER_REGISTRY)}
+
+
+@app.post("/api/regional-status/refresh")
+def api_regional_refresh(category: str | None = None):
+    return regional_services.refresh_all_caches(category)
+
+
+@app.get("/api/regional-status/weather")
+def api_regional_weather(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    return regional_services.get_weather_status(location, refresh=refresh)
+
+
+@app.get("/api/regional-status/accidents")
+def api_regional_accidents(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    return regional_services.get_accidents_status(location, refresh=refresh)
+
+
+@app.get("/api/regional-status/bus-service")
+def api_regional_bus_service(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    return regional_services.get_bus_service_status(location, refresh=refresh)
+
+
+@app.get("/api/regional-status/water-supply")
+def api_regional_water_supply(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    return regional_services.get_water_supply_status(location, refresh=refresh)
+
+
+@app.get("/api/regional-status/air-quality")
+def api_regional_air_quality(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    return regional_services.get_air_quality_status(location, refresh=refresh)
+
+
+@app.get("/api/regional-status/complaints")
+def api_regional_complaints(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    with get_connection() as connection:
+        return regional_services.get_complaints_status(connection, location, refresh=refresh)
+
+
+@app.get("/api/regional-status/government-services")
+def api_regional_government_services(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    return regional_services.get_government_services_status(location, refresh=refresh)
+
+
+@app.get("/api/regional-status/emergency-alerts")
+def api_regional_emergency_alerts(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    return regional_services.get_emergency_alerts_status(location, refresh=refresh)
+
+
+@app.get("/api/regional-status/traffic")
+def api_regional_traffic(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    return regional_services.get_traffic_status(location, refresh=refresh)
+
+
+@app.get("/api/regional-status/public-transport")
+def api_regional_public_transport(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    return regional_services.get_public_transport_status(location, refresh=refresh)
+
+
+@app.get("/api/regional-status/rail-service")
+def api_regional_rail_service(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    return regional_services.get_rail_service_status(location, refresh=refresh)
+
+
+@app.get("/api/regional-status/electricity")
+def api_regional_electricity(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    return regional_services.get_electricity_status(location, refresh=refresh)
+
+
+@app.get("/api/regional-status/parking")
+def api_regional_parking(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    return regional_services.get_parking_status(location, refresh=refresh)
+
+
+@app.get("/api/regional-status/road-damage")
+def api_regional_road_damage(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    with get_connection() as connection:
+        return regional_services.get_road_damage_status(connection, location, refresh=refresh)
+
+
+@app.get("/api/regional-status/tourist-attractions")
+def api_regional_tourist_attractions(location: str = "Bengaluru, Karnataka", refresh: bool = False):
+    return regional_services.get_tourist_attractions_status(location, refresh=refresh)
 
 
 def regional_analytics_data(

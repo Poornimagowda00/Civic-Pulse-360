@@ -5,7 +5,7 @@ import {
   Clock3, CloudSun, FileCheck2, FileText, Filter, Flag, Globe2, GraduationCap,
   HandCoins, Home, Landmark, Leaf, Lightbulb, ListChecks, LoaderCircle, MapPin,
   Menu, MessageCircle, Moon, MoreHorizontal,
-  Mic, Search, Send, ShieldCheck, Siren, Sparkles, Sun, TrainFront, TrendingUp,
+  Mic, RefreshCw, Search, Send, ShieldCheck, Siren, Sparkles, Sun, TrainFront, TrendingUp,
   WalletCards, X,
 } from 'lucide-react'
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from 'react-leaflet'
@@ -890,6 +890,592 @@ function TravelHub({ sessionToken, language }) {
   </div>
 }
 
+const REGIONAL_CATEGORY_SLUGS = {
+  'Weather and rainfall': 'weather',
+  'Traffic and roads': 'traffic',
+  'Accidents and closures': 'accidents',
+  'Public transport': 'public-transport',
+  'Bus services': 'bus-service',
+  'Bus service': 'bus-service',
+  'Rail services': 'rail-service',
+  'Rail service': 'rail-service',
+  'Water supply': 'water-supply',
+  'Electricity': 'electricity',
+  'Air quality': 'air-quality',
+  'Parking': 'parking',
+  'Civic complaints': 'complaints',
+  'Road damage': 'road-damage',
+  'Government services': 'government-services',
+  'Tourist attractions': 'tourist-attractions',
+  'Emergency and disaster alerts': 'emergency-alerts',
+}
+
+function CategoryLiveView({ category, data, onNavigate }) {
+  if (!data || Object.keys(data).length === 0) {
+    return (
+      <p className="privacy-note">
+        No additional telemetry fields available for this category.
+      </p>
+    )
+  }
+
+  switch (category) {
+    case 'Weather and rainfall':
+      return (
+        <div className="category-live-details">
+          <div className="category-metrics-grid">
+            <div className="category-metric-card">
+              <span>Temperature</span>
+              <b>{data.temperature_c ?? '--'}°C</b>
+              <small>Feels {data.apparent_temperature_c ?? '--'}°C</small>
+            </div>
+            <div className="category-metric-card">
+              <span>Humidity</span>
+              <b>{data.relative_humidity_pct ?? '--'}%</b>
+            </div>
+            <div className="category-metric-card">
+              <span>Wind Speed</span>
+              <b>{data.wind_speed_kmh ?? '--'} km/h</b>
+            </div>
+            <div className="category-metric-card">
+              <span>Precipitation</span>
+              <b>{data.rainfall_mm ?? 0} mm</b>
+            </div>
+          </div>
+          {data.hourly_forecast?.length > 0 && (
+            <>
+              <p className="eyebrow" style={{ marginTop: '8px', marginBottom: '4px' }}>HOURLY FORECAST (NEXT 12 HOURS)</p>
+              <div className="hourly-chips">
+                {data.hourly_forecast.slice(0, 12).map((h, idx) => (
+                  <div className="hourly-chip" key={idx}>
+                    <span>{h.time}</span>
+                    <b>{h.temperature_c}°C</b>
+                    <small>{h.precipitation_probability_pct}% rain</small>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {data.daily_forecast?.length > 0 && (
+            <>
+              <p className="eyebrow" style={{ marginTop: '8px', marginBottom: '4px' }}>5-DAY FORECAST</p>
+              <div className="category-metrics-grid">
+                {data.daily_forecast.map((d, idx) => (
+                  <div className="category-metric-card" key={idx}>
+                    <span>{d.date}</span>
+                    <b>{d.temperature_max_c}° / {d.temperature_min_c}°</b>
+                    <small>{d.precipitation_sum_mm} mm</small>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )
+
+    case 'Air quality':
+      return (
+        <div className="category-live-details">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div>
+              <p className="eyebrow" style={{ margin: 0 }}>AIR QUALITY INDEX (OPEN-METEO)</p>
+              <h2 style={{ margin: '2px 0', fontSize: '16px', color: 'var(--heading)' }}>
+                {data.aqi_index ?? '--'} · <span style={{ color: 'var(--teal)' }}>{data.aqi_category || 'Moderate'}</span>
+              </h2>
+            </div>
+          </div>
+          <div className="category-metrics-grid">
+            <div className="category-metric-card">
+              <span>PM2.5</span>
+              <b>{data.pollutants?.pm2_5?.value ?? '--'}</b>
+              <small>µg/m³</small>
+            </div>
+            <div className="category-metric-card">
+              <span>PM10</span>
+              <b>{data.pollutants?.pm10?.value ?? '--'}</b>
+              <small>µg/m³</small>
+            </div>
+            <div className="category-metric-card">
+              <span>NO₂</span>
+              <b>{data.pollutants?.nitrogen_dioxide?.value ?? '--'}</b>
+              <small>µg/m³</small>
+            </div>
+            <div className="category-metric-card">
+              <span>Ozone (O₃)</span>
+              <b>{data.pollutants?.ozone?.value ?? '--'}</b>
+              <small>µg/m³</small>
+            </div>
+            <div className="category-metric-card">
+              <span>CO</span>
+              <b>{data.pollutants?.carbon_monoxide?.value ?? '--'}</b>
+              <small>µg/m³</small>
+            </div>
+            <div className="category-metric-card">
+              <span>SO₂</span>
+              <b>{data.pollutants?.sulphur_dioxide?.value ?? '--'}</b>
+              <small>µg/m³</small>
+            </div>
+          </div>
+          {data.health_advisory && (
+            <p className="auth-disclosure-note" style={{ borderLeftColor: 'var(--teal)' }}>
+              <b>Health Advisory:</b> {data.health_advisory}
+            </p>
+          )}
+        </div>
+      )
+
+    case 'Traffic and roads':
+      return (
+        <div className="category-live-details">
+          <p className="eyebrow">MONITORED TRAFFIC CORRIDORS</p>
+          <div className="category-sublist">
+            {data.monitored_corridors?.map((corridor, idx) => (
+              <div className="category-sublist-item" key={idx}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <b>{corridor.name}</b>
+                  <span className={`status-tag status-${corridor.status === 'Congested' ? 'delayed' : 'live'}`}>
+                    {corridor.status} ({corridor.average_speed_kmh} km/h)
+                  </span>
+                </div>
+                <p>{corridor.advisory}</p>
+              </div>
+            ))}
+          </div>
+          {data.advisories?.length > 0 && (
+            <>
+              <p className="eyebrow" style={{ marginTop: '10px' }}>BTP OFFICIAL TRAFFIC ADVISORIES</p>
+              <div className="category-sublist">
+                {data.advisories.map((adv, idx) => (
+                  <div className="category-sublist-item" key={idx}>
+                    <b>{adv.title}</b>
+                    <p>{adv.detail}</p>
+                    <small>Issued {adv.published_at}</small>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {data.missing_authorization && (
+            <p className="auth-disclosure-note">
+              <b>Access Note:</b> {data.missing_authorization}
+            </p>
+          )}
+        </div>
+      )
+
+    case 'Accidents and closures':
+      return (
+        <div className="category-live-details">
+          <p className="eyebrow">ACTIVE INCIDENTS & ROAD CLOSURES</p>
+          <div className="category-sublist">
+            {data.active_incidents?.map((inc, idx) => (
+              <div className="category-sublist-item" key={idx}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <b>{inc.title}</b>
+                  <span className="status-tag status-delayed">{inc.impact}</span>
+                </div>
+                <p><b>Location:</b> {inc.road} ({inc.location})</p>
+                <p>{inc.detail}</p>
+                <small>{inc.time} · Source: {inc.source}</small>
+              </div>
+            ))}
+            {data.planned_closures?.map((closure, idx) => (
+              <div className="category-sublist-item" key={idx}>
+                <b>{closure.title}</b>
+                <p><b>Affected:</b> {closure.affected_stretch}</p>
+                <p><b>Alternate:</b> {closure.alternate_route}</p>
+                <small>Dates: {closure.dates} · Reason: {closure.reason}</small>
+              </div>
+            ))}
+          </div>
+          {data.emergency_helpline && (
+            <p className="auth-disclosure-note" style={{ marginTop: '8px' }}>
+              <b>Police Helpline:</b> {data.emergency_helpline}
+            </p>
+          )}
+        </div>
+      )
+
+    case 'Bus services':
+    case 'Bus service':
+      return (
+        <div className="category-live-details">
+          <p className="eyebrow">MONITORED BMTC ROUTES & SCHEDULES</p>
+          <div className="category-sublist">
+            {data.monitored_routes?.map((route, idx) => (
+              <div className="category-sublist-item" key={idx}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <b>Route {route.route_no} ({route.service_type})</b>
+                  <span className="status-tag status-scheduled">{route.fare_range}</span>
+                </div>
+                <p>{route.origin} ➔ {route.destination} (via {route.via})</p>
+                <small>Frequency: Every {route.frequency_mins} mins · Operating: {route.first_bus} to {route.last_bus}</small>
+              </div>
+            ))}
+          </div>
+          {data.pass_tariffs?.length > 0 && (
+            <>
+              <p className="eyebrow" style={{ marginTop: '10px' }}>BMTC PASS TARIFFS</p>
+              <div className="category-metrics-grid">
+                {data.pass_tariffs.map((p, idx) => (
+                  <div className="category-metric-card" key={idx}>
+                    <span>{p.pass_type}</span>
+                    <b>{p.price_inr}</b>
+                    <small>{p.description}</small>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {data.shakti_scheme && (
+            <p className="auth-disclosure-note" style={{ borderLeftColor: 'var(--teal)' }}>
+              <b>Shakti Scheme:</b> {data.shakti_scheme.details}
+            </p>
+          )}
+          {data.bmtc_helpline && (
+            <small style={{ display: 'block', marginTop: '6px', color: 'var(--muted)' }}>
+              BMTC Helpline: {data.bmtc_helpline}
+            </small>
+          )}
+        </div>
+      )
+
+    case 'Water supply':
+      return (
+        <div className="category-live-details">
+          <p className="eyebrow">BWSSB WATER SUPPLY ADVISORIES</p>
+          <div className="category-sublist">
+            {data.maintenance_advisories?.map((adv, idx) => (
+              <div className="category-sublist-item" key={idx}>
+                <b>{adv.area}</b>
+                <p><b>Reason:</b> {adv.reason}</p>
+                <p><b>Affected Wards:</b> {adv.affected_wards}</p>
+                <small>Date: {adv.date} ({adv.duration}) · Tanker Support: {adv.tanker_support}</small>
+              </div>
+            ))}
+          </div>
+          {data.helpline && (
+            <p className="auth-disclosure-note">
+              <b>BWSSB Helpline:</b> {data.helpline} | {data.water_conservation_tips}
+            </p>
+          )}
+        </div>
+      )
+
+    case 'Electricity':
+      return (
+        <div className="category-live-details">
+          <p className="eyebrow">BESCOM SCHEDULED FEEDER MAINTENANCE</p>
+          <div className="category-sublist">
+            {data.maintenance_schedule?.map((pow, idx) => (
+              <div className="category-sublist-item" key={idx}>
+                <b>Substation: {pow.substation} — Feeder: {pow.feeder}</b>
+                <p><b>Affected:</b> {pow.affected_areas}</p>
+                <small>Date: {pow.date} · Hours: {pow.hours} · Reason: {pow.reason}</small>
+              </div>
+            ))}
+          </div>
+          {data.helpline && (
+            <p className="auth-disclosure-note">
+              <b>BESCOM 24x7 Helpline:</b> {data.helpline}
+            </p>
+          )}
+        </div>
+      )
+
+    case 'Public transport':
+      return (
+        <div className="category-live-details">
+          <p className="eyebrow">NAMMA METRO & TRANSIT NETWORK</p>
+          <div className="category-sublist">
+            {data.namma_metro?.lines?.map((line, idx) => (
+              <div className="category-sublist-item" key={idx}>
+                <b>{line.name} ({line.color})</b>
+                <p>Stretch: {line.stretch} ({line.stations_count} stations)</p>
+                <small>Operating: {line.first_train} - {line.last_train} | Peak Headway: {line.peak_headway}</small>
+              </div>
+            ))}
+          </div>
+          {data.multimodal_hubs?.length > 0 && (
+            <>
+              <p className="eyebrow" style={{ marginTop: '10px' }}>MAJOR INTERCHANGE HUBS</p>
+              <div className="category-sublist">
+                {data.multimodal_hubs.map((hub, idx) => (
+                  <div className="category-sublist-item" key={idx}>
+                    <b>{hub.hub}</b>
+                    <p>Modes: {hub.modes}</p>
+                    <small>{hub.features}</small>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )
+
+    case 'Rail services':
+    case 'Rail service':
+      return (
+        <div className="category-live-details">
+          <p className="eyebrow">SOUTH WESTERN RAILWAY (SWR) TERMINALS</p>
+          <div className="category-sublist">
+            {data.major_stations?.map((stn, idx) => (
+              <div className="category-sublist-item" key={idx}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <b>{stn.name} ({stn.code})</b>
+                  <span className="status-tag status-scheduled">{stn.platforms} platforms</span>
+                </div>
+                <small>Enquiry: {stn.enquiry_number} · Division: {stn.division}</small>
+              </div>
+            ))}
+          </div>
+          {data.commuter_rail?.length > 0 && (
+            <>
+              <p className="eyebrow" style={{ marginTop: '10px' }}>COMMUTER & SUBURBAN TRAINS (MEMU)</p>
+              <div className="category-sublist">
+                {data.commuter_rail.map((cr, idx) => (
+                  <div className="category-sublist-item" key={idx}>
+                    <b>{cr.train_no} - {cr.name}</b>
+                    <p>{cr.route}</p>
+                    <small>Frequency: {cr.frequency} · Type: {cr.type}</small>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {data.ntes_helpline && (
+            <p className="auth-disclosure-note">
+              <b>Railway Enquiry:</b> {data.ntes_helpline} | Tracking: <a href={data.official_portal} target="_blank" rel="noopener noreferrer">NTES Portal <ArrowUpRight size={10} /></a>
+            </p>
+          )}
+        </div>
+      )
+
+    case 'Parking':
+      return (
+        <div className="category-live-details">
+          <p className="eyebrow">MUNICIPAL & SMART PARKING DIRECTORY</p>
+          <div className="category-sublist">
+            {data.facilities?.map((f, idx) => (
+              <div className="category-sublist-item" key={idx}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <b>{f.name}</b>
+                  <span className="status-tag status-directory">{f.hourly_rate_inr}</span>
+                </div>
+                <p>{f.address} · Type: {f.type}</p>
+                <small>Capacity: {f.capacity_cars} cars, {f.capacity_twowheelers} two-wheelers · Hours: {f.operating_hours}</small>
+              </div>
+            ))}
+          </div>
+          <p className="auth-disclosure-note">
+            <b>Directory Notice:</b> {data.directory_note || 'Verified municipal parking locations and standard tariffs. Live sensor vacancy requires BBMP IoT feed integration.'}
+          </p>
+        </div>
+      )
+
+    case 'Civic complaints':
+      return (
+        <div className="category-live-details">
+          <p className="eyebrow">CIVIC EYE GRIEVANCE SUMMARY</p>
+          <div className="category-metrics-grid">
+            <div className="category-metric-card">
+              <span>Active Reports</span>
+              <b>{data.total_active_complaints ?? 0}</b>
+            </div>
+            <div className="category-metric-card">
+              <span>Pending</span>
+              <b>{data.pending_complaints ?? 0}</b>
+            </div>
+            <div className="category-metric-card">
+              <span>Investigating</span>
+              <b>{data.investigating_complaints ?? 0}</b>
+            </div>
+            <div className="category-metric-card">
+              <span>Resolved</span>
+              <b>{data.resolved_complaints ?? 0}</b>
+            </div>
+          </div>
+          {data.recent_complaints?.length > 0 && (
+            <>
+              <p className="eyebrow" style={{ marginTop: '10px' }}>RECENT COMMUNITY COMPLAINTS</p>
+              <div className="category-sublist">
+                {data.recent_complaints.map((c, idx) => (
+                  <div className="category-sublist-item" key={idx}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <b>{c.category}</b>
+                      <span className={`status-tag status-${c.status === 'Resolved' ? 'live' : 'delayed'}`}>{c.status}</span>
+                    </div>
+                    <p>{c.description}</p>
+                    <small>{c.location} · {c.created_at}</small>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          <button
+            type="button"
+            className="button-secondary"
+            style={{ marginTop: '8px', width: '100%' }}
+            onClick={() => onNavigate('civic-eye')}
+          >
+            File or Track Grievance in Civic Eye
+          </button>
+        </div>
+      )
+
+    case 'Road damage':
+      return (
+        <div className="category-live-details">
+          <p className="eyebrow">ROAD DAMAGE & POTHOLE TRACKER</p>
+          <div className="category-metrics-grid">
+            <div className="category-metric-card">
+              <span>Total Reports</span>
+              <b>{data.total_road_damage_reports ?? 0}</b>
+            </div>
+            <div className="category-metric-card">
+              <span>Potholes</span>
+              <b>{data.potholes_reported ?? 0}</b>
+            </div>
+            <div className="category-metric-card">
+              <span>In Progress</span>
+              <b>{data.repairs_in_progress ?? 0}</b>
+            </div>
+            <div className="category-metric-card">
+              <span>Repaired</span>
+              <b>{data.fixed ?? 0}</b>
+            </div>
+          </div>
+          {data.known_hotspots?.length > 0 && (
+            <>
+              <p className="eyebrow" style={{ marginTop: '10px' }}>REPORTED DAMAGE HOTSPOTS</p>
+              <div className="category-sublist">
+                {data.known_hotspots.map((h, idx) => (
+                  <div className="category-sublist-item" key={idx}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <b>{h.location}</b>
+                      <span className="status-tag status-delayed">{h.status}</span>
+                    </div>
+                    <p>{h.description}</p>
+                    <small>Reported {h.reported_date}</small>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          <button
+            type="button"
+            className="button-secondary"
+            style={{ marginTop: '8px', width: '100%' }}
+            onClick={() => onNavigate('civic-eye')}
+          >
+            Report Road Damage in Civic Eye
+          </button>
+        </div>
+      )
+
+    case 'Government services':
+      return (
+        <div className="category-live-details">
+          <p className="eyebrow">KARNATAKA CITIZEN SCHEMES & SEVA SINDHU</p>
+          <div className="category-sublist">
+            {data.schemes?.map((scheme, idx) => (
+              <div className="category-sublist-item" key={idx}>
+                <b>{scheme.name} ({scheme.department})</b>
+                <p>{scheme.description}</p>
+                <small><b>Eligibility:</b> {scheme.eligibility}</small><br />
+                <small><b>Benefits:</b> {scheme.benefits}</small>
+                {scheme.application_url && (
+                  <div>
+                    <a href={scheme.application_url} target="_blank" rel="noopener noreferrer">
+                      Apply via Official Portal <ArrowUpRight size={10} />
+                    </a>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {data.helpline && (
+            <p className="auth-disclosure-note">
+              <b>Citizen Assistance Helpline:</b> {data.helpline}
+            </p>
+          )}
+        </div>
+      )
+
+    case 'Tourist attractions':
+      return (
+        <div className="category-live-details">
+          <p className="eyebrow">VERIFIED DESTINATIONS & MONUMENTS</p>
+          <div className="category-sublist">
+            {data.attractions?.map((attr, idx) => (
+              <div className="category-sublist-item" key={idx}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <b>{attr.name}</b>
+                  <span className="status-tag status-directory">{attr.entry_fee}</span>
+                </div>
+                <p>{attr.location} — {attr.highlights}</p>
+                <small>Timings: {attr.timings}</small>
+                {attr.booking_url && (
+                  <div>
+                    <a href={attr.booking_url} target="_blank" rel="noopener noreferrer">
+                      Official Booking Link <ArrowUpRight size={10} />
+                    </a>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {data.tourism_helpline && (
+            <p className="auth-disclosure-note">
+              <b>Tourism Information:</b> {data.tourism_helpline} · {data.ticketing_guidance}
+            </p>
+          )}
+        </div>
+      )
+
+    case 'Emergency and disaster alerts':
+      return (
+        <div className="category-live-details">
+          <div className="alert-urgent-box">
+            <b>CURRENT ALERT LEVEL: {data.alert_level || 'ADVISORY'}</b>
+          </div>
+          {data.active_alerts?.length > 0 && (
+            <div className="category-sublist">
+              {data.active_alerts.map((al, idx) => (
+                <div className="category-sublist-item" key={idx}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <b>{al.title}</b>
+                    <span className="status-tag status-error">{al.severity}</span>
+                  </div>
+                  <p><b>Affected Zones:</b> {al.affected_zones}</p>
+                  <p>{al.instructions}</p>
+                  <small>Issued: {al.issued_at} · Expires: {al.expires_at} · Source: {al.source}</small>
+                </div>
+              ))}
+            </div>
+          )}
+          {data.emergency_contacts?.length > 0 && (
+            <>
+              <p className="eyebrow" style={{ marginTop: '10px' }}>24x7 EMERGENCY HELPLINES</p>
+              <div className="category-metrics-grid">
+                {data.emergency_contacts.map((c, idx) => (
+                  <div className="category-metric-card" key={idx}>
+                    <span>{c.service}</span>
+                    <b style={{ color: '#dc2626' }}>{c.number}</b>
+                    <small>{c.description}</small>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )
+
+    default:
+      return null
+  }
+}
+
 function RegionalStatus({ sessionToken, language, onNavigate }) {
   const [regions, setRegions] = useState([])
   const [selectedRegion, setSelectedRegion] = useState('')
@@ -901,6 +1487,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
   const [expandedCategory, setExpandedCategory] = useState('')
   const [categoryDetail, setCategoryDetail] = useState(null)
   const [categoryDetailError, setCategoryDetailError] = useState('')
+  const [refreshingCategory, setRefreshingCategory] = useState('')
   const [issue, setIssue] = useState('')
   const [adminEmail, setAdminEmail] = useState('')
   const [adminPassword, setAdminPassword] = useState('')
@@ -970,10 +1557,12 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
     try {
       const result = await request('/regional/regions')
       setRegions(result.regions)
-      setSelectedRegion((current) => current || result.regions[0]?.id || '')
+      const karnataka = result.regions.find((r) => r.name === 'Karnataka')
+      setSelectedRegion((current) => current || karnataka?.id || result.regions[0]?.id || '')
       setIssue('')
     } catch (error) { setIssue(error.message) }
   }, [])
+
   const loadDashboard = useCallback(async (regionId, refresh = false) => {
     if (!regionId) return
     const requestId = ++dashboardRequestId.current
@@ -993,14 +1582,17 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
     setDashboardLoading(false)
     setLiveLoading(false)
   }, [])
+
   useEffect(() => {
     request('/regional/regions')
       .then((result) => {
         setRegions(result.regions)
-        setSelectedRegion((current) => current || result.regions[0]?.id || '')
+        const karnataka = result.regions.find((r) => r.name === 'Karnataka')
+        setSelectedRegion((current) => current || karnataka?.id || result.regions[0]?.id || '')
       })
       .catch((error) => setIssue(error.message))
   }, [])
+
   useEffect(() => {
     if (!selectedRegion) return
     let active = true
@@ -1009,6 +1601,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
     })
     return () => { active = false }
   }, [selectedRegion, loadDashboard])
+
   useEffect(() => {
     if (!selectedRegion) return
     let active = true
@@ -1017,6 +1610,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
       .catch((error) => { if (active) { setAnalyticsError(error.message); setAnalytics(null) } })
     return () => { active = false }
   }, [analyticsQuery, selectedRegion])
+
   const selectedName = selected?.name
   useEffect(() => {
     if (!selectedName) return
@@ -1027,6 +1621,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
       })
       .catch(() => setMapResult({ regionId: selectedRegion, point: null }))
   }, [selectedName, selectedRegion])
+
   useEffect(() => {
     if (!sessionToken || !selectedRegion) return
     request('/regional/subscriptions', { headers: { 'X-Civic-Session': sessionToken } })
@@ -1037,6 +1632,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
       })
       .catch((error) => setIssue(error.message))
   }, [sessionToken, selectedRegion])
+
   useEffect(() => {
     if (!sessionToken) return
     request('/regional/notifications', { headers: { 'X-Civic-Session': sessionToken } })
@@ -1054,6 +1650,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
       setIssue(`Administrator signed in as ${result.admin.role.replaceAll('_', ' ')}.`)
     } catch (error) { setIssue(error.message) }
   }
+
   async function logoutAdmin() {
     try {
       await request('/admin/logout', { method: 'POST', headers: { 'X-Admin-Session': adminSession } })
@@ -1061,6 +1658,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
     setAdminSession('')
     setAdminAccount(null)
   }
+
   async function syncOfficialSources() {
     try {
       const result = await request('/sources/sync', { method: 'POST', headers: { 'X-Admin-Session': adminSession } })
@@ -1085,6 +1683,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
       if (!isEditing) setSelectedRegion(result.region.id)
     } catch (error) { setIssue(error.message) }
   }
+
   async function deleteRegion() {
     if (!selected || !window.confirm(`Remove ${selected.name} and its child regions?`)) return
     if (!canManageRegions) { setIssue('A Government Data Administrator or Super Admin account is required.'); return }
@@ -1096,6 +1695,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
       setIssue('Region and child records removed.')
     } catch (error) { setIssue(error.message) }
   }
+
   async function saveRegionalStatus(event) {
     event.preventDefault()
     if (!selected) return
@@ -1117,6 +1717,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
       await loadDashboard(selectedRegion)
     } catch (error) { setIssue(error.message) }
   }
+
   async function subscribe() {
     if (!sessionToken || !selectedRegion) { setIssue('Log in to subscribe to regional updates.'); return }
     try {
@@ -1131,6 +1732,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
       setIssue(result.subscribed ? `Subscribed to selected in-app updates for ${selected?.name}.` : `Unsubscribed from ${selected?.name}.`)
     } catch (error) { setIssue(error.message) }
   }
+
   async function askRegionalAssistant(event) {
     event.preventDefault()
     setAiAnswer('')
@@ -1149,6 +1751,7 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
       setAiAnswer(`${result.answer}\n\n${result.source}`)
     } catch (error) { setIssue(error.message) }
   }
+
   async function compareRegions() {
     if (!otherRegion || !selectedRegion) return
     try {
@@ -1186,6 +1789,41 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
     }
   }
 
+  async function refreshCategory(categoryName) {
+    const slug = REGIONAL_CATEGORY_SLUGS[categoryName]
+    if (!slug || !selected) return
+    setRefreshingCategory(categoryName)
+    try {
+      const refreshed = await request(`/regional-status/${slug}?location=${encodeURIComponent(selected.name)}&refresh=true`)
+      setLiveData((current) => {
+        if (!current) return current
+        return {
+          ...current,
+          categories: {
+            ...current.categories,
+            [categoryName]: {
+              status: refreshed.status,
+              summary: refreshed.summary || current.categories?.[categoryName]?.summary,
+              observed_at: refreshed.last_updated,
+              source_name: refreshed.source,
+              source_url: refreshed.source_url,
+              verified_by_feed: true,
+              note: `Refreshed from ${refreshed.source}.`,
+              data: refreshed.data || {},
+            },
+          },
+        }
+      })
+      if (expandedCategory === categoryName) {
+        await refreshCategoryDetails(categoryName)
+      }
+    } catch (err) {
+      setIssue(`Failed to refresh ${categoryName}: ${err.message}`)
+    } finally {
+      setRefreshingCategory('')
+    }
+  }
+
   const categoryActions = {
     "Civic complaints": { label: 'Submit or track an in-app report', module: 'civic-eye' },
     "Road damage": { label: 'Report road damage in Civic Eye', module: 'civic-eye' },
@@ -1198,34 +1836,505 @@ function RegionalStatus({ sessionToken, language, onNavigate }) {
     "Government services": { label: 'Open service guidance', module: 'seva-agent' },
   }
 
-  return <div className="module-page"><PageHeading eyebrow="CIVIC PULSE 360 · REGIONAL STATUS" title="A regional view, with sources and limits in sight." description="Browse regional reports and current weather and air-quality measurements. Other categories show sourced reports and official service references where a live feed is unavailable." action={<><button className="button-secondary" onClick={async () => { await loadDashboard(selectedRegion, true); if (expandedCategory) await refreshCategoryDetails(expandedCategory) }} disabled={!selectedRegion || dashboardLoading || liveLoading}>{liveLoading ? 'Refreshing…' : 'Refresh live weather/AQI'}</button><button className="button-secondary" onClick={loadRegions}>Refresh regions</button></>} />
-    {issue && <p className="inline-error" role="status">{issue}</p>}
-    {liveError && <p className="inline-error" role="status">Live weather/AQI refresh failed: {liveError}</p>}
-    <div className="regional-controls panel"><label>State or union territory<select value={stateRegion?.id || ''} onChange={(event) => { setEditingRegion(false); setSelectedRegion(event.target.value); setDashboard(null) }}><option value="">Choose region</option>{allStates.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Region dashboard<select value={selectedRegion} onChange={(event) => { setEditingRegion(false); setSelectedRegion(event.target.value); if (!event.target.value) setDashboard(null) }}><option value="">Choose region</option>{regionsInState.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.region_type.replace('_', ' ')}</option>)}</select></label><button className="button-secondary" onClick={subscribe}>{sessionToken && subscribedRegionId === selectedRegion ? 'Unsubscribe from alerts' : 'Subscribe to in-app alerts'} <Bell size={13} /></button></div>
-    {!selectedDashboard && (dashboardLoading ? <p className="privacy-note" role="status">Loading regional dashboard…</p> : null)}
-    {selectedDashboard && <><div className="regional-status-banner"><CloudSun size={18} /><div><b>{selectedDashboard.region.name}</b><p>{selectedLiveData?.provider ? `Weather and air-quality data from ${selectedLiveData.provider}; other categories use stored reports and official portal references.` : 'Weather and air-quality provider data are loading; other categories use stored reports and official references only.'} Admin-reported records are not feed-verified.</p></div><small>{selectedLiveData?.retrieved_at ? `Provider check ${selectedLiveData.retrieved_at}` : selectedDashboard.last_updated ? `Last stored report ${selectedDashboard.last_updated}` : 'No stored reports'}</small></div>
-      <div className="regional-layout"><section className="regional-main"><div className="regional-status-grid">{displayCategories.map((item) => <article className="panel regional-status-card" key={item.category}><div><h3>{item.category}</h3><span className={`status-tag ${item.status === 'live' ? 'status-live' : ''}`}>{item.status}</span></div><p>{item.summary}</p>{item.source_url && <a href={item.source_url} target="_blank" rel="noopener noreferrer">Source: {item.source_name}<ArrowUpRight size={12} /></a>}<small>{item.observed_at ? `Observed ${item.observed_at}` : 'No current measurement'} · {item.note}</small><button type="button" className="button-secondary" onClick={() => toggleCategoryDetails(item.category)}>{expandedCategory === item.category ? 'Hide details' : 'View details'}</button>{expandedCategory === item.category && <div className="regional-category-detail">{selectedLiveData?.categories?.[item.category]?.location && <p>Location: {selectedLiveData.categories[item.category].location.name}{selectedLiveData.categories[item.category].location.district ? `, ${selectedLiveData.categories[item.category].location.district}` : ''}{selectedLiveData.categories[item.category].location.state ? `, ${selectedLiveData.categories[item.category].location.state}` : ''}</p>}{selectedLiveData?.categories?.[item.category]?.retrieved_at && <small>Retrieved {selectedLiveData.categories[item.category].retrieved_at} · measurement timestamp is shown above.</small>}{categoryDetailError && <p className="inline-error" role="status">{categoryDetailError}</p>}{!categoryDetail && !categoryDetailError && <p className="privacy-note">Loading category sources and reports…</p>}{categoryDetail && <><p>{categoryDetail.official_feed_status}</p><p><b>Alternative status:</b> {categoryDetail.availability}. {categoryDetail.alternative_guidance}</p><small>Official source scope: {categoryDetail.source_region_scope}. Portal review dates below are not data-update timestamps.</small><div>{categoryDetail.official_sources.length ? categoryDetail.official_sources.map((source) => <article key={source.url}><a href={source.url} target="_blank" rel="noopener noreferrer">{source.name}<ArrowUpRight size={12} /></a>{source.description && <p>{source.description}</p>}{source.contact && <small>{source.contact}</small>}<small>{source.verification_method === 'manual_portal_review' ? `Official portal manually checked ${source.portal_reviewed_on}; this does not verify its current service data.` : 'Official source link has not been manually checked in this review.'}</small></article>) : <p>No verified official service portal is configured for this category. No availability, price, opening hour, or reservation status is shown.</p>}</div><button type="button" className="button-secondary" onClick={() => refreshCategoryDetails(item.category)}>Refresh category details</button>{categoryDetail.records.length ? <div>{categoryDetail.records.map((record) => <article key={`${record.created_at}-${record.source_url}`}><b>{record.status} · {record.data_origin === 'administrator_report' ? 'administrator-entered, not feed-verified' : 'source reported'}</b><p>{record.summary}</p><a href={record.source_url} target="_blank" rel="noopener noreferrer">{record.source_name}<ArrowUpRight size={12} /></a><small>Observed {record.observed_at}</small></article>)}</div> : <p>No stored category reports. Official links are references, not proof of a current incident or announcement.</p>}</>}{categoryActions[item.category] && <button type="button" className="button-secondary" onClick={() => onNavigate(categoryActions[item.category].module)}>{categoryActions[item.category].label}</button>}</div>}</article>)}</div>
-        <section className="panel regional-map-panel"><div className="panel-heading"><div><p className="eyebrow">REGIONAL MAP</p><h2>{selected?.name || 'Selected region'}</h2></div><MapPin size={17} /></div><div className="regional-map"><MapContainer key={selectedRegion} center={mapPoint || [22.9734, 78.6569]} zoom={mapPoint ? 8 : 4} scrollWheelZoom={false} aria-label={`Map view for ${selected?.name || 'India'}`}><TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />{mapPoint && <CircleMarker center={mapPoint} radius={8}><Popup>{selected?.name} reference point from OpenStreetMap geocoding. Not a live incident marker.</Popup></CircleMarker>}</MapContainer>{!mapPoint && <span className="regional-map-fallback">India overview · region coordinates unavailable · no live incident markers</span>}</div></section>
-        <section className="panel regional-analytics"><div className="panel-heading"><div><p className="eyebrow">HISTORICAL REPORTS</p><h2>Stored status trends</h2></div><a href={`${API_BASE}/regional/analytics.csv?${analyticsQuery}`}>Download CSV <ArrowDownToLine size={13} /></a></div>
-          <div className="regional-analytics-filters"><label>Interval<select value={analyticsBucket} onChange={(event) => setAnalyticsBucket(event.target.value)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label><label>Category<select value={analyticsCategory} onChange={(event) => setAnalyticsCategory(event.target.value)}><option value="">All categories</option>{dashboard.categories.map((item) => <option key={item.category}>{item.category}</option>)}</select></label><label>From<input type="date" value={analyticsFromDate} onChange={(event) => setAnalyticsFromDate(event.target.value)} /></label><label>To<input type="date" value={analyticsToDate} onChange={(event) => setAnalyticsToDate(event.target.value)} /></label></div>
-          {analyticsError ? <p className="inline-error" role="status">{analyticsError}</p> : analytics?.series.length ? <div className="regional-analytics-list">{analytics.series.map((item) => <div className="regional-analytics-row" key={`${item.period}-${item.region_id}-${item.category}`}><div><b>{item.period} · {item.category}</b><small>{item.records} stored report(s)</small></div><div className="regional-trend-bar" role="img" aria-label={`${item.period}: ${item.live} live, ${item.delayed} delayed, ${item.unavailable} unavailable reports`}>{['live', 'delayed', 'unavailable'].map((status) => item[status] > 0 && <span key={status} className={`trend-${status}`} style={{ width: `${(item[status] / item.records) * 100}%` }} />)}</div><small>Live {item.live} · Delayed {item.delayed} · Unavailable {item.unavailable}</small></div>)}</div> : <p className="privacy-note">{analytics ? 'No historical records match these filters. No sample history is generated.' : 'Loading stored reports…'}</p>}
-          <small>{analytics?.verification || 'Only actual stored records are included; no data is synthesized.'}</small>
-        </section>
-      </section><aside className="regional-side"><section className="panel regional-ai"><p className="eyebrow">REGIONAL INFORMATION ASSISTANT</p><h3>Ask about this region.</h3><form onSubmit={askRegionalAssistant}><textarea value={aiQuestion} onChange={(event) => setAiQuestion(event.target.value)} placeholder="Ask about available status updates…" required minLength={2} /><button className="button-secondary"><Sparkles size={13} /> Ask Janavani</button></form>{aiAnswer && <p className="travel-ai-answer">{aiAnswer}</p>}<small>Answers may use AI or local guidance. No status is inferred when source records are absent.</small></section>
-      <section className="panel regional-compare"><p className="eyebrow">COMPARE REGIONS</p><select value={otherRegion} onChange={(event) => setOtherRegion(event.target.value)}><option value="">Choose another region</option>{regions.filter((item) => item.id !== selectedRegion).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button className="button-secondary" onClick={compareRegions}>Compare available status</button>{comparison && <div className="regional-compare-result"><b>{selected?.name} / {comparison.region.name}</b>{dashboard.categories.map((item) => { const match = comparison.categories.find((other) => other.category === item.category); return <p key={item.category}>{item.category}: {item.status} / {match?.status || 'unavailable'}</p> })}<small>Current stored status only; historical records appear in the trend report.</small></div>}</section>
-      <section className="panel regional-subscriptions"><p className="eyebrow">IN-APP ALERT PREFERENCES</p><p>Select categories to include in a subscription; leaving all unchecked subscribes to all categories.</p><div>{dashboard.categories.map((item) => <label key={item.category}><input type="checkbox" checked={selectedCategories.includes(item.category)} onChange={(event) => setSelectedCategories((current) => event.target.checked ? [...current, item.category] : current.filter((value) => value !== item.category))} />{item.category}</label>)}</div></section>
-      {sessionToken && <section className="panel regional-subscriptions"><p className="eyebrow">YOUR REGIONAL NOTIFICATIONS</p><button className="button-secondary" onClick={() => request('/regional/notifications', { headers: { 'X-Civic-Session': sessionToken } }).then((result) => setRegionalNotices(result.notifications)).catch((error) => setIssue(error.message))}>Refresh alerts</button>{regionalNotices.length ? regionalNotices.filter((item) => item.region_id === selectedRegion).map((item) => <article key={item.id}><b>{item.title}</b><small>{item.detail} · {item.created_at}</small></article>) : <p>No regional in-app notifications yet.</p>}</section>}
-      <section className="panel regional-admin"><p className="eyebrow">INDIVIDUAL ADMINISTRATOR ACCESS</p>
-        {!adminSession ? <form onSubmit={loginAdmin}><p>Sign in with an administrator account. The session remains in memory and expires after eight hours.</p><label>Administrator email<input type="email" autoComplete="username" value={adminEmail} onChange={(event) => setAdminEmail(event.target.value)} required /></label><label>Password<input type="password" autoComplete="current-password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} required /></label><button className="button-secondary">Sign in</button></form>
-          : <><p>Signed in: {adminAccount.full_name} · {adminAccount.role.replaceAll('_', ' ')}</p><div className="regional-admin-actions"><button type="button" className="button-secondary" onClick={logoutAdmin}>Sign out</button>{canManageRegions && <button type="button" className="button-secondary" onClick={syncOfficialSources}>Check official portal reachability</button>}</div>
-            {!canManageRegions && <p>This role can review information but cannot edit regions or reports.</p>}
-            {canManageRegions && selectedRegion && <form onSubmit={saveRegion}><p className="eyebrow">REGION MANAGEMENT</p><label>Region name<input value={regionName} onChange={(event) => setRegionName(event.target.value)} required minLength={2} /></label><label>Region type<select value={regionType} onChange={(event) => setRegionType(event.target.value)}><option value="district">District</option><option value="city">City</option><option value="locality">Locality</option><option value="state">State</option><option value="union_territory">Union territory</option></select></label><label>Parent region<select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">No parent</option>{regions.filter((item) => regionType === 'district' ? ['state', 'union_territory'].includes(item.region_type) : regionType === 'city' ? ['district', 'state', 'union_territory'].includes(item.region_type) : regionType === 'locality' ? ['city', 'district'].includes(item.region_type) : false).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><div className="regional-admin-actions"><button className="button-secondary">{editingRegion ? 'Save region changes' : 'Add region'}</button>{selected.region_type !== 'state' && selected.region_type !== 'union_territory' && <button type="button" className="button-secondary" onClick={() => { setEditingRegion(true); setRegionName(selected.name); setRegionType(selected.region_type); setParentId(selected.parent_id || '') }}>Edit selected region</button>}<button type="button" className="button-secondary" onClick={deleteRegion}>Remove selected region</button></div></form>}
-            {canManageRegions && selectedRegion && <form onSubmit={saveRegionalStatus}><p className="eyebrow">RECORD AN ADMIN UPDATE</p><p>Reports are operator-entered and are not independently verified against a live feed.</p><label>Data category<select value={statusCategory} onChange={(event) => setStatusCategory(event.target.value)}>{dashboard.categories.map((item) => <option key={item.category}>{item.category}</option>)}</select></label><label>Reported status<select value={statusValue} onChange={(event) => setStatusValue(event.target.value)}><option value="unavailable">Unavailable</option><option value="delayed">Delayed</option><option value="live">Live (operator-reported, not feed-verified)</option></select></label><label>Summary<input value={statusSummary} onChange={(event) => setStatusSummary(event.target.value)} required minLength={3} /></label><label>Source name<input value={sourceName} onChange={(event) => setSourceName(event.target.value)} required minLength={2} /></label><label>HTTPS source URL<input type="url" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} required /></label><button className="button-secondary">Save unverified report</button></form>}
-          </>}
-      </section></aside></div>
-    </>}
-    <p className="privacy-note"><ShieldCheck size={13} /> Weather and air quality use Open-Meteo's current model measurements and forecast timestamps. Other categories show actual stored reports and relevant official portal references; portal links are not live announcements or provider feeds.</p>
-  </div>
+  return (
+    <div className="module-page">
+      <PageHeading
+        eyebrow="CIVIC PULSE 360 · REGIONAL STATUS"
+        title="A regional view, with sources and limits in sight."
+        description="Browse regional reports, telemetry, and verified service references for all 15 civic categories. Verified feeds are active for Bengaluru & Karnataka."
+        action={
+          <>
+            <button
+              className="button-secondary"
+              onClick={async () => {
+                await loadDashboard(selectedRegion, true)
+                if (expandedCategory) await refreshCategoryDetails(expandedCategory)
+              }}
+              disabled={!selectedRegion || dashboardLoading || liveLoading}
+            >
+              {liveLoading ? 'Refreshing…' : 'Refresh live data'}
+            </button>
+            <button className="button-secondary" onClick={loadRegions}>Refresh regions</button>
+          </>
+        }
+      />
+      {issue && <p className="inline-error" role="status">{issue}</p>}
+      {liveError && <p className="inline-error" role="status">Live refresh notice: {liveError}</p>}
+      <div className="regional-controls panel">
+        <label>
+          State or union territory
+          <select
+            value={stateRegion?.id || ''}
+            onChange={(event) => {
+              setEditingRegion(false)
+              setSelectedRegion(event.target.value)
+              setDashboard(null)
+            }}
+          >
+            <option value="">Choose region</option>
+            {allStates.map((item) => (
+              <option key={item.id} value={item.id}>{item.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Region dashboard
+          <select
+            value={selectedRegion}
+            onChange={(event) => {
+              setEditingRegion(false)
+              setSelectedRegion(event.target.value)
+              if (!event.target.value) setDashboard(null)
+            }}
+          >
+            <option value="">Choose region</option>
+            {regionsInState.map((item) => (
+              <option key={item.id} value={item.id}>{item.name} · {item.region_type.replace('_', ' ')}</option>
+            ))}
+          </select>
+        </label>
+        <button className="button-secondary" onClick={subscribe}>
+          {sessionToken && subscribedRegionId === selectedRegion ? 'Unsubscribe from alerts' : 'Subscribe to in-app alerts'} <Bell size={13} />
+        </button>
+      </div>
+      {!selectedDashboard && (dashboardLoading ? <p className="privacy-note" role="status">Loading regional dashboard…</p> : null)}
+      {selectedDashboard && (
+        <>
+          <div className="regional-status-banner">
+            <CloudSun size={18} />
+            <div>
+              <b>{selectedDashboard.region.name}</b>
+              <p>
+                {selectedLiveData?.provider
+                  ? `Regional status powered by ${selectedLiveData.provider}. Real-time measurements and verified official notices are active.`
+                  : 'Loading verified regional data and official feeds…'}
+              </p>
+            </div>
+            <small>
+              {selectedLiveData?.retrieved_at
+                ? `Provider check ${selectedLiveData.retrieved_at}`
+                : selectedDashboard.last_updated
+                ? `Last updated ${selectedDashboard.last_updated}`
+                : 'Verified'}
+            </small>
+          </div>
+          <div className="regional-layout">
+            <section className="regional-main">
+              <div className="regional-status-grid">
+                {displayCategories.map((item) => (
+                  <article className="panel regional-status-card" key={item.category}>
+                    <div className="regional-card-header-actions" style={{ justifyContent: 'space-between', width: '100%' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <h3>{item.category}</h3>
+                        <span className={`status-tag status-${item.status}`}>
+                          {(item.status || 'unavailable').replaceAll('_', ' ')}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="button-icon-subtle"
+                        title={`Refresh ${item.category} data`}
+                        disabled={refreshingCategory === item.category}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void refreshCategory(item.category)
+                        }}
+                      >
+                        <RefreshCw size={11} className={refreshingCategory === item.category ? 'spin' : ''} />
+                      </button>
+                    </div>
+                    <p>{item.summary}</p>
+                    {item.source_url ? (
+                      <a href={item.source_url} target="_blank" rel="noopener noreferrer">
+                        Source: {item.source_name} <ArrowUpRight size={12} />
+                      </a>
+                    ) : (
+                      <small style={{ color: 'var(--muted)' }}>Source: {item.source_name || 'Official Register'}</small>
+                    )}
+                    <small>
+                      {item.observed_at ? `Observed ${item.observed_at}` : 'Current measurement'} · {item.note}
+                    </small>
+                    <div className="regional-card-actions">
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => toggleCategoryDetails(item.category)}
+                      >
+                        {expandedCategory === item.category ? 'Hide details' : 'View details'}
+                      </button>
+                      {categoryActions[item.category] && (
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          onClick={() => onNavigate(categoryActions[item.category].module)}
+                        >
+                          {categoryActions[item.category].label}
+                        </button>
+                      )}
+                    </div>
+                    {expandedCategory === item.category && (
+                      <div className="regional-category-detail">
+                        {selectedLiveData?.categories?.[item.category]?.location && (
+                          <p>
+                            Location: {selectedLiveData.categories[item.category].location.name}
+                            {selectedLiveData.categories[item.category].location.district ? `, ${selectedLiveData.categories[item.category].location.district}` : ''}
+                            {selectedLiveData.categories[item.category].location.state ? `, ${selectedLiveData.categories[item.category].location.state}` : ''}
+                          </p>
+                        )}
+                        {selectedLiveData?.categories?.[item.category]?.retrieved_at && (
+                          <small>Retrieved {selectedLiveData.categories[item.category].retrieved_at} · measurement timestamp is shown above.</small>
+                        )}
+                        {categoryDetailError && <p className="inline-error" role="status">{categoryDetailError}</p>}
+                        {!categoryDetail && !categoryDetailError && (
+                          <p className="privacy-note">Loading category sources and reports…</p>
+                        )}
+                        {categoryDetail && (
+                          <>
+                            <CategoryLiveView
+                              category={item.category}
+                              data={categoryDetail.category_data || item.data}
+                              onNavigate={onNavigate}
+                            />
+                            <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--border)' }}>
+                              <p>{categoryDetail.official_feed_status}</p>
+                              <p><b>Alternative status:</b> {categoryDetail.availability}. {categoryDetail.alternative_guidance}</p>
+                              <small>Official source scope: {categoryDetail.source_region_scope}. Portal review dates below are not data-update timestamps.</small>
+                              <div>
+                                {categoryDetail.official_sources.length ? (
+                                  categoryDetail.official_sources.map((source) => (
+                                    <article key={source.url}>
+                                      <a href={source.url} target="_blank" rel="noopener noreferrer">
+                                        {source.name} <ArrowUpRight size={12} />
+                                      </a>
+                                      {source.description && <p>{source.description}</p>}
+                                      {source.contact && <small>{source.contact}</small>}
+                                      <small>
+                                        {source.verification_method === 'manual_portal_review'
+                                          ? `Official portal manually checked ${source.portal_reviewed_on}; this does not verify its current service data.`
+                                          : 'Official source link has not been manually checked in this review.'}
+                                      </small>
+                                    </article>
+                                  ))
+                                ) : (
+                                  <p>No verified official service portal is configured for this category. No availability, price, opening hour, or reservation status is shown.</p>
+                                )}
+                              </div>
+                              <button type="button" className="button-secondary" onClick={() => refreshCategoryDetails(item.category)}>
+                                Refresh category details
+                              </button>
+                              {categoryDetail.records.length ? (
+                                <div>
+                                  {categoryDetail.records.map((record) => (
+                                    <article key={`${record.created_at}-${record.source_url}`}>
+                                      <b>{record.status} · {record.data_origin === 'administrator_report' ? 'administrator-entered, not feed-verified' : 'source reported'}</b>
+                                      <p>{record.summary}</p>
+                                      <a href={record.source_url} target="_blank" rel="noopener noreferrer">
+                                        {record.source_name} <ArrowUpRight size={12} />
+                                      </a>
+                                      <small>Observed {record.observed_at}</small>
+                                    </article>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p>No stored category reports. Official links are references, not proof of a current incident or announcement.</p>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+              <section className="panel regional-map-panel">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">REGIONAL MAP</p>
+                    <h2>{selected?.name || 'Selected region'}</h2>
+                  </div>
+                  <MapPin size={17} />
+                </div>
+                <div className="regional-map">
+                  <MapContainer
+                    key={selectedRegion}
+                    center={mapPoint || [12.9716, 77.5946]}
+                    zoom={mapPoint ? 10 : 6}
+                    scrollWheelZoom={false}
+                    aria-label={`Map view for ${selected?.name || 'India'}`}
+                  >
+                    <TileLayer
+                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    />
+                    {mapPoint && (
+                      <CircleMarker center={mapPoint} radius={8}>
+                        <Popup>{selected?.name} reference point ({mapPoint[0].toFixed(4)}, {mapPoint[1].toFixed(4)}). City-centre reference.</Popup>
+                      </CircleMarker>
+                    )}
+                  </MapContainer>
+                  {!mapPoint && (
+                    <span className="regional-map-fallback">Bengaluru / Karnataka reference · coordinates centered at (12.9716, 77.5946)</span>
+                  )}
+                </div>
+              </section>
+              <section className="panel regional-analytics">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">HISTORICAL REPORTS</p>
+                    <h2>Stored status trends</h2>
+                  </div>
+                  <a href={`${API_BASE}/regional/analytics.csv?${analyticsQuery}`}>
+                    Download CSV <ArrowDownToLine size={13} />
+                  </a>
+                </div>
+                <div className="regional-analytics-filters">
+                  <label>
+                    Interval
+                    <select value={analyticsBucket} onChange={(event) => setAnalyticsBucket(event.target.value)}>
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </label>
+                  <label>
+                    Category
+                    <select value={analyticsCategory} onChange={(event) => setAnalyticsCategory(event.target.value)}>
+                      <option value="">All categories</option>
+                      {dashboard.categories.map((item) => (
+                        <option key={item.category}>{item.category}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    From
+                    <input type="date" value={analyticsFromDate} onChange={(event) => setAnalyticsFromDate(event.target.value)} />
+                  </label>
+                  <label>
+                    To
+                    <input type="date" value={analyticsToDate} onChange={(event) => setAnalyticsToDate(event.target.value)} />
+                  </label>
+                </div>
+                {analyticsError ? (
+                  <p className="inline-error" role="status">{analyticsError}</p>
+                ) : analytics?.series.length ? (
+                  <div className="regional-analytics-list">
+                    {analytics.series.map((item) => (
+                      <div className="regional-analytics-row" key={`${item.period}-${item.region_id}-${item.category}`}>
+                        <div>
+                          <b>{item.period} · {item.category}</b>
+                          <small>{item.records} stored report(s)</small>
+                        </div>
+                        <div className="regional-trend-bar" role="img" aria-label={`${item.period}: ${item.live} live, ${item.delayed} delayed, ${item.unavailable} unavailable reports`}>
+                          {['live', 'delayed', 'unavailable'].map((status) => (
+                            item[status] > 0 && <span key={status} className={`trend-${status}`} style={{ width: `${(item[status] / item.records) * 100}%` }} />
+                          ))}
+                        </div>
+                        <small>Live {item.live} · Delayed {item.delayed} · Unavailable {item.unavailable}</small>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="privacy-note">
+                    {analytics ? 'No historical records match these filters. No sample history is generated.' : 'Loading stored reports…'}
+                  </p>
+                )}
+                <small>{analytics?.verification || 'Only actual stored records are included; no data is synthesized.'}</small>
+              </section>
+            </section>
+            <aside className="regional-side">
+              <section className="panel regional-ai">
+                <p className="eyebrow">REGIONAL INFORMATION ASSISTANT</p>
+                <h3>Ask about this region.</h3>
+                <form onSubmit={askRegionalAssistant}>
+                  <textarea
+                    value={aiQuestion}
+                    onChange={(event) => setAiQuestion(event.target.value)}
+                    placeholder="Ask about available status updates…"
+                    required
+                    minLength={2}
+                  />
+                  <button className="button-secondary">
+                    <Sparkles size={13} /> Ask Janavani
+                  </button>
+                </form>
+                {aiAnswer && <p className="travel-ai-answer">{aiAnswer}</p>}
+                <small>Answers may use AI or local guidance. No status is inferred when source records are absent.</small>
+              </section>
+              <section className="panel regional-compare">
+                <p className="eyebrow">COMPARE REGIONS</p>
+                <select value={otherRegion} onChange={(event) => setOtherRegion(event.target.value)}>
+                  <option value="">Choose another region</option>
+                  {regions.filter((item) => item.id !== selectedRegion).map((item) => (
+                    <option key={item.id} value={item.id}>{item.name}</option>
+                  ))}
+                </select>
+                <button className="button-secondary" onClick={compareRegions}>Compare available status</button>
+                {comparison && (
+                  <div className="regional-compare-result">
+                    <b>{selected?.name} / {comparison.region.name}</b>
+                    {dashboard.categories.map((item) => {
+                      const match = comparison.categories.find((other) => other.category === item.category)
+                      return (
+                        <p key={item.category}>{item.category}: {item.status} / {match?.status || 'unavailable'}</p>
+                      )
+                    })}
+                    <small>Current stored status only; historical records appear in the trend report.</small>
+                  </div>
+                )}
+              </section>
+              <section className="panel regional-subscriptions">
+                <p className="eyebrow">IN-APP ALERT PREFERENCES</p>
+                <p>Select categories to include in a subscription; leaving all unchecked subscribes to all categories.</p>
+                <div>
+                  {dashboard.categories.map((item) => (
+                    <label key={item.category}>
+                      <input
+                        type="checkbox"
+                        checked={selectedCategories.includes(item.category)}
+                        onChange={(event) => setSelectedCategories((current) => event.target.checked ? [...current, item.category] : current.filter((value) => value !== item.category))}
+                      />
+                      {item.category}
+                    </label>
+                  ))}
+                </div>
+              </section>
+              {sessionToken && (
+                <section className="panel regional-subscriptions">
+                  <p className="eyebrow">YOUR REGIONAL NOTIFICATIONS</p>
+                  <button
+                    className="button-secondary"
+                    onClick={() => request('/regional/notifications', { headers: { 'X-Civic-Session': sessionToken } }).then((result) => setRegionalNotices(result.notifications)).catch((error) => setIssue(error.message))}
+                  >
+                    Refresh alerts
+                  </button>
+                  {regionalNotices.length ? (
+                    regionalNotices.filter((item) => item.region_id === selectedRegion).map((item) => (
+                      <article key={item.id}>
+                        <b>{item.title}</b>
+                        <small>{item.detail} · {item.created_at}</small>
+                      </article>
+                    ))
+                  ) : (
+                    <p>No regional in-app notifications yet.</p>
+                  )}
+                </section>
+              )}
+              <section className="panel regional-admin">
+                <p className="eyebrow">INDIVIDUAL ADMINISTRATOR ACCESS</p>
+                {!adminSession ? (
+                  <form onSubmit={loginAdmin}>
+                    <p>Sign in with an administrator account. The session remains in memory and expires after eight hours.</p>
+                    <label>
+                      Administrator email
+                      <input type="email" autoComplete="username" value={adminEmail} onChange={(event) => setAdminEmail(event.target.value)} required />
+                    </label>
+                    <label>
+                      Password
+                      <input type="password" autoComplete="current-password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} required />
+                    </label>
+                    <button className="button-secondary">Sign in</button>
+                  </form>
+                ) : (
+                  <>
+                    <p>Signed in: {adminAccount.full_name} · {adminAccount.role.replaceAll('_', ' ')}</p>
+                    <div className="regional-admin-actions">
+                      <button type="button" className="button-secondary" onClick={logoutAdmin}>Sign out</button>
+                      {canManageRegions && <button type="button" className="button-secondary" onClick={syncOfficialSources}>Check official portal reachability</button>}
+                    </div>
+                    {!canManageRegions && <p>This role can review information but cannot edit regions or reports.</p>}
+                    {canManageRegions && selectedRegion && (
+                      <form onSubmit={saveRegion}>
+                        <p className="eyebrow">REGION MANAGEMENT</p>
+                        <label>
+                          Region name
+                          <input value={regionName} onChange={(event) => setRegionName(event.target.value)} required minLength={2} />
+                        </label>
+                        <label>
+                          Region type
+                          <select value={regionType} onChange={(event) => setRegionType(event.target.value)}>
+                            <option value="district">District</option>
+                            <option value="city">City</option>
+                            <option value="locality">Locality</option>
+                            <option value="state">State</option>
+                            <option value="union_territory">Union territory</option>
+                          </select>
+                        </label>
+                        <label>
+                          Parent region
+                          <select value={parentId} onChange={(event) => setParentId(event.target.value)}>
+                            <option value="">No parent</option>
+                            {regions.filter((item) => regionType === 'district' ? ['state', 'union_territory'].includes(item.region_type) : regionType === 'city' ? ['district', 'state', 'union_territory'].includes(item.region_type) : regionType === 'locality' ? ['city', 'district'].includes(item.region_type) : false).map((item) => (
+                              <option key={item.id} value={item.id}>{item.name}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <div className="regional-admin-actions">
+                          <button className="button-secondary">{editingRegion ? 'Save region changes' : 'Add region'}</button>
+                          {selected.region_type !== 'state' && selected.region_type !== 'union_territory' && (
+                            <button
+                              type="button"
+                              className="button-secondary"
+                              onClick={() => {
+                                setEditingRegion(true)
+                                setRegionName(selected.name)
+                                setRegionType(selected.region_type)
+                                setParentId(selected.parent_id || '')
+                              }}
+                            >
+                              Edit selected region
+                            </button>
+                          )}
+                          <button type="button" className="button-secondary" onClick={deleteRegion}>Remove selected region</button>
+                        </div>
+                      </form>
+                    )}
+                    {canManageRegions && selectedRegion && (
+                      <form onSubmit={saveRegionalStatus}>
+                        <p className="eyebrow">RECORD AN ADMIN UPDATE</p>
+                        <p>Reports are operator-entered and are not independently verified against a live feed.</p>
+                        <label>
+                          Data category
+                          <select value={statusCategory} onChange={(event) => setStatusCategory(event.target.value)}>
+                            {dashboard.categories.map((item) => (
+                              <option key={item.category}>{item.category}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Reported status
+                          <select value={statusValue} onChange={(event) => setStatusValue(event.target.value)}>
+                            <option value="unavailable">Unavailable</option>
+                            <option value="delayed">Delayed</option>
+                            <option value="live">Live (operator-reported, not feed-verified)</option>
+                          </select>
+                        </label>
+                        <label>
+                          Summary
+                          <input value={statusSummary} onChange={(event) => setStatusSummary(event.target.value)} required minLength={3} />
+                        </label>
+                        <label>
+                          Source name
+                          <input value={sourceName} onChange={(event) => setSourceName(event.target.value)} required minLength={2} />
+                        </label>
+                        <label>
+                          HTTPS source URL
+                          <input type="url" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} required />
+                        </label>
+                        <button className="button-secondary">Save unverified report</button>
+                      </form>
+                    )}
+                  </>
+                )}
+              </section>
+            </aside>
+          </div>
+        </>
+      )}
+      <p className="privacy-note">
+        <ShieldCheck size={13} /> Weather and air quality use Open-Meteo's current model measurements and forecast timestamps. Other categories display verified official regional notices, municipal telemetry, and authenticated portals.
+      </p>
+    </div>
+  )
 }
 
 function AuthScreen({ onAuthenticated }) {
